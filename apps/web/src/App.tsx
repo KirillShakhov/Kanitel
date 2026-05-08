@@ -45,6 +45,12 @@ type Theme = 'light' | 'dark'
 type Locale = 'ru' | 'en'
 type ParticipantKind = 'person' | 'agent'
 
+type EnvPair = {
+  id: string
+  key: string
+  value: string
+}
+
 type TaskDraft = {
   title: string
   description: string
@@ -91,7 +97,7 @@ type AgentDraft = {
   commandTemplate: string
   systemPrompt: string
   enabled: boolean
-  environmentText: string
+  environment: EnvPair[]
 }
 
 type Participant = {
@@ -150,6 +156,16 @@ const labels = {
     selectAgent: 'Выбрать агента',
     role: 'Роль',
     remove: 'Убрать',
+    existingPerson: 'Существующий человек',
+    newPersonName: 'Имя нового человека',
+    newPersonEmail: 'Email нового человека',
+    participantRole: 'Роль в проекте',
+    deleteAgent: 'Удалить агента',
+    envKey: 'Переменная',
+    envValue: 'Значение',
+    addEnv: 'Добавить переменную',
+    removeEnv: 'Удалить переменную',
+    noEnv: 'Переменных окружения нет',
     repositoryName: 'Название',
     repositoryUrl: 'https:// или git@host:path.git',
     branch: 'Ветка',
@@ -243,6 +259,16 @@ const labels = {
     selectAgent: 'Select agent',
     role: 'Role',
     remove: 'Remove',
+    existingPerson: 'Existing person',
+    newPersonName: 'New person name',
+    newPersonEmail: 'New person email',
+    participantRole: 'Project role',
+    deleteAgent: 'Delete agent',
+    envKey: 'Variable',
+    envValue: 'Value',
+    addEnv: 'Add variable',
+    removeEnv: 'Remove variable',
+    noEnv: 'No environment variables',
     repositoryName: 'Name',
     repositoryUrl: 'https:// or git@host:path.git',
     branch: 'Branch',
@@ -471,7 +497,7 @@ export default function App() {
       commandTemplate: selectedAgent.commandTemplate,
       systemPrompt: selectedAgent.systemPrompt,
       enabled: selectedAgent.enabled,
-      environmentText: envToText(selectedAgent.environment)
+      environment: envToPairs(selectedAgent.environment)
     })
   }, [selectedAgent])
 
@@ -636,6 +662,13 @@ export default function App() {
     await mutate(patchJson(`/api/agents/${selectedAgent.id}`, agentPayload(agentDraft)))
   }
 
+  async function deleteAgent() {
+    if (!selectedAgent) return
+    await mutate(deleteJson(`/api/agents/${selectedAgent.id}`))
+    setSelectedAgentId('')
+    setAgentDraft(initialAgentDraft(bootstrap?.providerPresets[0], bootstrap?.agentTemplates[0]))
+  }
+
   function applyPresetToDraft(presetId: string) {
     const preset = bootstrap?.providerPresets.find(item => item.id === presetId)
     if (!preset) return
@@ -646,7 +679,7 @@ export default function App() {
       model: preset.defaultModel,
       baseUrl: preset.baseUrl,
       apiKeyEnvName: preset.apiKeyEnvName,
-      environmentText: envToText(preset.environment)
+      environment: envToPairs(preset.environment)
     }))
   }
 
@@ -858,6 +891,7 @@ export default function App() {
           onTemplate={applyTemplateToDraft}
           onCreateAgent={createAgent}
           onSaveAgent={saveAgent}
+          onDeleteAgent={deleteAgent}
         />
       )}
 
@@ -1440,34 +1474,52 @@ function ProjectsPage({
                   </div>
                 ))}
                 <div className="participant-form">
-                  <select value={participantDraft.kind} onChange={event => onParticipantDraftChange({ ...participantDraft, kind: event.target.value as ParticipantKind })}>
-                    <option value="person">{t.person}</option>
-                    <option value="agent">{t.agent}</option>
-                  </select>
+                  <label>
+                    {t.participantType}
+                    <select value={participantDraft.kind} onChange={event => onParticipantDraftChange({ ...participantDraft, kind: event.target.value as ParticipantKind })}>
+                      <option value="person">{t.person}</option>
+                      <option value="agent">{t.agent}</option>
+                    </select>
+                  </label>
                   {participantDraft.kind === 'person' ? (
                     <>
-                      <select value={participantDraft.personId} onChange={event => onParticipantDraftChange({ ...participantDraft, personId: event.target.value })}>
-                        <option value="">{t.selectPerson}</option>
-                        {state.people.map(person => (
-                          <option key={person.id} value={person.id}>{person.displayName}</option>
-                        ))}
-                      </select>
-                      <input value={participantDraft.displayName} onChange={event => onParticipantDraftChange({ ...participantDraft, displayName: event.target.value })} placeholder={t.displayName} />
-                      <input value={participantDraft.email} onChange={event => onParticipantDraftChange({ ...participantDraft, email: event.target.value })} placeholder={t.email} />
+                      <label>
+                        {t.existingPerson}
+                        <select value={participantDraft.personId} onChange={event => onParticipantDraftChange({ ...participantDraft, personId: event.target.value })}>
+                          <option value="">{t.selectPerson}</option>
+                          {state.people.map(person => (
+                            <option key={person.id} value={person.id}>{person.displayName}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        {t.newPersonName}
+                        <input value={participantDraft.displayName} onChange={event => onParticipantDraftChange({ ...participantDraft, displayName: event.target.value })} placeholder={t.displayName} />
+                      </label>
+                      <label>
+                        {t.newPersonEmail}
+                        <input value={participantDraft.email} onChange={event => onParticipantDraftChange({ ...participantDraft, email: event.target.value })} placeholder={t.email} />
+                      </label>
                     </>
                   ) : (
-                    <select value={participantDraft.agentId} onChange={event => onParticipantDraftChange({ ...participantDraft, agentId: event.target.value })}>
-                      <option value="">{t.selectAgent}</option>
-                      {unlinkedAgents.map(agent => (
-                        <option key={agent.id} value={agent.id}>{agent.name}</option>
+                    <label className="participant-wide">
+                      {t.selectAgent}
+                      <select value={participantDraft.agentId} onChange={event => onParticipantDraftChange({ ...participantDraft, agentId: event.target.value })}>
+                        <option value="">{t.selectAgent}</option>
+                        {unlinkedAgents.map(agent => (
+                          <option key={agent.id} value={agent.id}>{agent.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  <label>
+                    {t.participantRole}
+                    <select value={participantDraft.role} onChange={event => onParticipantDraftChange({ ...participantDraft, role: event.target.value })}>
+                      {roleOptions.map(role => (
+                        <option key={role} value={role}>{role}</option>
                       ))}
                     </select>
-                  )}
-                  <select value={participantDraft.role} onChange={event => onParticipantDraftChange({ ...participantDraft, role: event.target.value })}>
-                    {roleOptions.map(role => (
-                      <option key={role} value={role}>{role}</option>
-                    ))}
-                  </select>
+                  </label>
                   <button className="secondary-button" onClick={onAddParticipant} disabled={busy}>
                     <UserPlus size={16} />
                     {t.addParticipant}
@@ -1534,7 +1586,8 @@ function SettingsPage({
   onPreset,
   onTemplate,
   onCreateAgent,
-  onSaveAgent
+  onSaveAgent,
+  onDeleteAgent
 }: {
   labels: Labels
   theme: Theme
@@ -1558,6 +1611,7 @@ function SettingsPage({
   onTemplate: (templateId: string) => void
   onCreateAgent: () => void
   onSaveAgent: () => void
+  onDeleteAgent: () => void
 }) {
   return (
     <section className="settings-page">
@@ -1588,15 +1642,21 @@ function SettingsPage({
         </Panel>
 
         <Panel title={t.appearance} icon={<Settings size={17} />}>
-          <div className="settings-row">
-            <strong>{t.theme}</strong>
-            <button className={theme === 'light' ? 'pill active' : 'pill'} onClick={() => onThemeChange('light')}>{t.lightThemeTitle}</button>
-            <button className={theme === 'dark' ? 'pill active' : 'pill'} onClick={() => onThemeChange('dark')}>{t.darkThemeTitle}</button>
-          </div>
-          <div className="settings-row">
-            <strong>{t.language}</strong>
-            <button className={locale === 'ru' ? 'pill active' : 'pill'} onClick={() => onLocaleChange('ru')}>Русский</button>
-            <button className={locale === 'en' ? 'pill active' : 'pill'} onClick={() => onLocaleChange('en')}>English</button>
+          <div className="appearance-form">
+            <label>
+              {t.theme}
+              <select value={theme} onChange={event => onThemeChange(event.target.value as Theme)}>
+                <option value="light">{t.lightThemeTitle}</option>
+                <option value="dark">{t.darkThemeTitle}</option>
+              </select>
+            </label>
+            <label>
+              {t.language}
+              <select value={locale} onChange={event => onLocaleChange(event.target.value as Locale)}>
+                <option value="ru">Русский</option>
+                <option value="en">English</option>
+              </select>
+            </label>
           </div>
         </Panel>
       </div>
@@ -1634,10 +1694,16 @@ function SettingsPage({
             />
             <div className="button-row">
               {selectedAgent ? (
-                <button className="primary-button" onClick={onSaveAgent} disabled={busy}>
-                  <Save size={16} />
-                  {t.save}
-                </button>
+                <>
+                  <button className="danger-button" onClick={onDeleteAgent} disabled={busy}>
+                    <Trash2 size={16} />
+                    {t.deleteAgent}
+                  </button>
+                  <button className="primary-button" onClick={onSaveAgent} disabled={busy}>
+                    <Save size={16} />
+                    {t.save}
+                  </button>
+                </>
               ) : (
                 <button className="primary-button" onClick={onCreateAgent} disabled={busy}>
                   <Plus size={16} />
@@ -1725,15 +1791,70 @@ function AgentForm({
         {t.systemPrompt}
         <textarea value={draft.systemPrompt} onChange={event => onChange({ ...draft, systemPrompt: event.target.value })} rows={5} />
       </label>
-      <label>
-        {t.environment}
-        <textarea value={draft.environmentText} onChange={event => onChange({ ...draft, environmentText: event.target.value })} rows={6} />
-      </label>
+      <EnvEditor labels={t} draft={draft} onChange={onChange} />
       <label className="toggle-row">
         <input type="checkbox" checked={draft.enabled} onChange={event => onChange({ ...draft, enabled: event.target.checked })} />
         {t.enabled}
       </label>
     </div>
+  )
+}
+
+function EnvEditor({
+  labels: t,
+  draft,
+  onChange
+}: {
+  labels: Labels
+  draft: AgentDraft
+  onChange: (draft: AgentDraft) => void
+}) {
+  const rows = draft.environment
+
+  function updateRow(id: string, patch: Partial<EnvPair>) {
+    onChange({
+      ...draft,
+      environment: rows.map(row => row.id === id ? { ...row, ...patch } : row)
+    })
+  }
+
+  function removeRow(id: string) {
+    onChange({
+      ...draft,
+      environment: rows.filter(row => row.id !== id)
+    })
+  }
+
+  return (
+    <section className="env-editor">
+      <header>
+        <strong>{t.environment}</strong>
+        <button className="secondary-button compact-text" type="button" onClick={() => onChange({ ...draft, environment: [...rows, newEnvPair()] })}>
+          <Plus size={15} />
+          {t.addEnv}
+        </button>
+      </header>
+      <div className="env-list">
+        {rows.length === 0 && (
+          <div className="empty-column">{t.noEnv}</div>
+        )}
+        {rows.map(row => (
+          <div className="env-row" key={row.id}>
+            <label>
+              {t.envKey}
+              <input value={row.key} onChange={event => updateRow(row.id, { key: event.target.value })} placeholder="OPENAI_API_KEY" />
+            </label>
+            <label>
+              {t.envValue}
+              <input value={row.value} onChange={event => updateRow(row.id, { value: event.target.value })} placeholder="..." />
+            </label>
+            <button className="icon-button compact env-remove" type="button" title={t.removeEnv} onClick={() => removeRow(row.id)}>
+              <Trash2 size={15} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </section>
   )
 }
 
@@ -1883,7 +2004,7 @@ function initialAgentDraft(preset?: ProviderPreset, template?: AgentTemplate): A
     commandTemplate: 'npx -y @gitlawb/openclaude@latest --print "$(cat \\"$KANITEL_TASK_PROMPT_FILE\\")"',
     systemPrompt: selectedTemplate.systemPrompt,
     enabled: true,
-    environmentText: envToText(selectedPreset.environment)
+    environment: envToPairs(selectedPreset.environment)
   }
 }
 
@@ -1900,7 +2021,7 @@ function agentPayload(draft: AgentDraft) {
     commandTemplate: draft.commandTemplate,
     systemPrompt: draft.systemPrompt,
     enabled: draft.enabled,
-    environment: parseEnvText(draft.environmentText)
+    environment: envPairsToRecord(draft.environment)
   }
 }
 
@@ -1926,23 +2047,28 @@ function toProfileDraft(person: Person): ProfileDraft {
   }
 }
 
-function parseEnvText(value: string): Record<string, string> {
-  return Object.fromEntries(
+function envToPairs(env: Record<string, string> = {}): EnvPair[] {
+  return Object.entries(env).map(([key, value]) => ({
+    id: newEnvId(),
+    key,
     value
-      .split('\n')
-      .map(line => line.trim())
-      .filter(line => line && !line.startsWith('#'))
-      .map(line => {
-        const index = line.indexOf('=')
-        return index === -1 ? [line, ''] : [line.slice(0, index).trim(), line.slice(index + 1).trim()]
-      })
+  }))
+}
+
+function envPairsToRecord(rows: EnvPair[]): Record<string, string> {
+  return Object.fromEntries(
+    rows
+      .map(row => [row.key.trim(), row.value.trim()] as const)
+      .filter(([key]) => key)
   )
 }
 
-function envToText(env: Record<string, string> = {}) {
-  return Object.entries(env)
-    .map(([key, value]) => `${key}=${value}`)
-    .join('\n')
+function newEnvPair(): EnvPair {
+  return { id: newEnvId(), key: '', value: '' }
+}
+
+function newEnvId() {
+  return `env_${Math.random().toString(36).slice(2, 10)}`
 }
 
 function priorityLabel(priority: string, t: Labels) {

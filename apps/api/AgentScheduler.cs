@@ -151,7 +151,7 @@ public sealed class AgentScheduler(
             var columns = snapshot.Columns.Where(c => c.ProjectId == project.Id).OrderBy(c => c.Position).ToList();
             var repositories = snapshot.Repositories.Where(r => r.ProjectId == project.Id).ToList();
 
-            var result = await runner.RunAsync(run, project, agent, task, comments, columns, repositories, cancellationToken);
+            var result = await runner.RunAsync(run, project, agent, task, comments, snapshot.People, snapshot.Agents, columns, repositories, cancellationToken);
             await CompleteRunAsync(run.Id, task.Id, agent.Id, result, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

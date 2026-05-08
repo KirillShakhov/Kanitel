@@ -250,6 +250,7 @@ textarea:focus {
 .language-button,
 .primary-button,
 .secondary-button,
+.danger-button,
 .main-nav button,
 .pill {
   border: 1px solid var(--border);
@@ -308,6 +309,19 @@ textarea:focus {
 .secondary-button {
   background: var(--surface-soft);
   font-weight: 700;
+}
+
+.danger-button {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  color: var(--danger);
+  font-weight: 800;
+}
+
+.compact-text {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 12px;
 }
 
 .full {
@@ -813,8 +827,26 @@ label {
 
 .participant-form {
   display: grid;
-  grid-template-columns: 140px minmax(0, 1fr) minmax(0, 1fr) minmax(110px, 150px) auto;
-  gap: 8px;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: 10px;
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+}
+
+.participant-form label,
+.appearance-form label,
+.env-row label {
+  margin-bottom: 0;
+}
+
+.participant-form button {
+  align-self: end;
+}
+
+.participant-wide {
+  grid-column: span 2;
 }
 
 .repo-row {
@@ -893,6 +925,38 @@ label {
 
 .agent-editor {
   min-width: 0;
+}
+
+.appearance-form,
+.env-editor,
+.env-list {
+  display: grid;
+  gap: 10px;
+}
+
+.env-editor {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--bg-soft);
+}
+
+.env-editor header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.env-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.55fr) minmax(160px, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.env-remove {
+  margin-bottom: 0;
 }
 
 .panel-title {
@@ -994,8 +1058,13 @@ label {
   .settings-row,
   .participant-row,
   .participant-form,
+  .env-row,
   .repo-row {
     grid-template-columns: 1fr;
+  }
+
+  .participant-wide {
+    grid-column: auto;
   }
 
   .modal-backdrop {

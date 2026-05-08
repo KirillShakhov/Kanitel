@@ -13,6 +13,8 @@ public interface IAgentRunner
         AgentProfile agent,
         TaskCard task,
         IReadOnlyList<TaskComment> comments,
+        IReadOnlyList<Person> people,
+        IReadOnlyList<AgentProfile> agents,
         IReadOnlyList<BoardColumn> columns,
         IReadOnlyList<RepositoryLink> repositories,
         CancellationToken cancellationToken);
@@ -35,6 +37,8 @@ public sealed class DockerAgentRunner(
         AgentProfile agent,
         TaskCard task,
         IReadOnlyList<TaskComment> comments,
+        IReadOnlyList<Person> people,
+        IReadOnlyList<AgentProfile> agents,
         IReadOnlyList<BoardColumn> columns,
         IReadOnlyList<RepositoryLink> repositories,
         CancellationToken cancellationToken)
@@ -48,7 +52,7 @@ public sealed class DockerAgentRunner(
 
         await CloneRepositoriesAsync(repositories, workspace, log, cancellationToken);
 
-        var prompt = BuildPrompt(project, agent, task, comments, columns, repositories);
+        var prompt = BuildPrompt(project, agent, task, comments, people, agents, columns, repositories);
         var promptPath = Path.Combine(workspace, "task.md");
         await File.WriteAllTextAsync(promptPath, prompt, cancellationToken);
 
@@ -309,17 +313,28 @@ public sealed class DockerAgentRunner(
         AgentProfile agent,
         TaskCard task,
         IReadOnlyList<TaskComment> comments,
+        IReadOnlyList<Person> people,
+        IReadOnlyList<AgentProfile> agents,
         IReadOnlyList<BoardColumn> columns,
         IReadOnlyList<RepositoryLink> repositories)
     {
+        var statusColumn = columns.FirstOrDefault(column => column.Id == task.ColumnId);
+        var firstComment = comments.OrderBy(comment => comment.CreatedAt).FirstOrDefault();
         var prompt = new StringBuilder();
         prompt.AppendLine(agent.SystemPrompt);
         prompt.AppendLine();
         prompt.AppendLine("# Kanitel Task");
         prompt.AppendLine($"Project: {project.Name}");
-        prompt.AppendLine($"Task: {task.Title}");
+        prompt.AppendLine($"Task title: {task.Title}");
+        prompt.AppendLine($"Task id: {task.Id}");
+        prompt.AppendLine($"Status: {(statusColumn is null ? task.ColumnId : $"{statusColumn.Name} ({statusColumn.Id})")}");
         prompt.AppendLine($"Priority: {task.Priority}");
+        prompt.AppendLine($"Assignment role: {task.AssignmentRole}");
+        prompt.AppendLine($"Assigned agent id: {task.AssigneeAgentId ?? "none"}");
+        prompt.AppendLine($"Assigned person id: {task.AssigneePersonId ?? "none"}");
+        prompt.AppendLine($"Author: {(firstComment is null ? "unknown" : AuthorLabel(firstComment, people, agents))}");
         prompt.AppendLine();
+        prompt.AppendLine("## Description");
         prompt.AppendLine(task.Description);
         prompt.AppendLine();
         prompt.AppendLine("## Linked repositories");
@@ -348,7 +363,7 @@ public sealed class DockerAgentRunner(
         prompt.AppendLine("## Conversation");
         foreach (var comment in comments.OrderBy(c => c.CreatedAt))
         {
-            prompt.AppendLine($"[{comment.CreatedAt:u}] {comment.AuthorType}:{comment.AuthorId}");
+            prompt.AppendLine($"[{comment.CreatedAt:u}] {AuthorLabel(comment, people, agents)}");
             prompt.AppendLine(comment.Body);
             prompt.AppendLine();
         }
@@ -364,6 +379,20 @@ public sealed class DockerAgentRunner(
         prompt.AppendLine("## Expected outcome");
         prompt.AppendLine("Work inside /workspace. If you change repositories, leave clear notes in your final response. Keep the response concise; Kanitel will attach it as an agent comment.");
         return prompt.ToString();
+    }
+
+    private static string AuthorLabel(
+        TaskComment comment,
+        IReadOnlyList<Person> people,
+        IReadOnlyList<AgentProfile> agents)
+    {
+        return comment.AuthorType switch
+        {
+            "person" => $"{people.FirstOrDefault(person => person.Id == comment.AuthorId)?.DisplayName ?? comment.AuthorId} (person:{comment.AuthorId})",
+            "agent" => $"{agents.FirstOrDefault(agent => agent.Id == comment.AuthorId)?.Name ?? comment.AuthorId} (agent:{comment.AuthorId})",
+            "system" => $"System ({comment.AuthorId})",
+            _ => $"{comment.AuthorType}:{comment.AuthorId}"
+        };
     }
 
     private bool IsMockRunner()

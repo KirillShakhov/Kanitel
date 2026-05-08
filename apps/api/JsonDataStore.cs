@@ -166,31 +166,14 @@ public sealed class JsonDataStore
             AvatarUrl = ""
         };
 
-        var defaultPreset = OpenClaudeCatalog.ProviderPresets.First(p => p.Id == "codex");
-        var agents = OpenClaudeCatalog.AgentTemplates.Select(template => new AgentProfile
-        {
-            Name = template.Name,
-            AgentType = template.AgentType,
-            ProviderPresetId = defaultPreset.Id,
-            Provider = defaultPreset.Provider,
-            BaseUrl = defaultPreset.BaseUrl,
-            Model = defaultPreset.DefaultModel,
-            ApiKeyEnvName = defaultPreset.ApiKeyEnvName,
-            AvatarUrl = defaultPreset.LogoUrl,
-            SystemPrompt = template.SystemPrompt,
-            ToolTags = template.ToolTags.ToList(),
-            Environment = new Dictionary<string, string>(defaultPreset.Environment)
-        }).ToList();
-
         var firstTask = new TaskCard
         {
             ProjectId = project.Id,
             ColumnId = columns[1].Id,
-            Title = "Wire a repository task to an agent",
-            Description = "Assign this card to an agent and add a comment; the scheduler will detect it and create a container workspace.",
-            AssigneeAgentId = agents.First(a => a.AgentType == "general-purpose").Id,
+            Title = "Create your first agent",
+            Description = "Add an agent in Settings, attach it to this project as a participant, then assign a task to it.",
             AssignmentRole = "worker",
-            Priority = "high",
+            Priority = "normal",
             Position = 0
         };
 
@@ -203,13 +186,8 @@ public sealed class JsonDataStore
             [
                 new ProjectMember { ProjectId = project.Id, PersonId = owner.Id, Role = "owner" }
             ],
-            Agents = agents,
-            ProjectAgents = agents.Select(agent => new ProjectAgent
-            {
-                ProjectId = project.Id,
-                AgentId = agent.Id,
-                Role = agent.AgentType == "verification" ? "reviewer" : "worker"
-            }).ToList(),
+            Agents = [],
+            ProjectAgents = [],
             Tasks = [firstTask],
             Comments =
             [

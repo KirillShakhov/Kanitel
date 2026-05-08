@@ -94,6 +94,7 @@ app.MapGet("/api/openapi.json", () => Results.Ok(new
         new { method = "POST", path = "/api/tasks/{taskId}/comments", purpose = "Add a human/system comment." },
         new { method = "POST", path = "/api/agent/tasks/{taskId}/comments", purpose = "Add a comment as a project-linked agent." },
         new { method = "PATCH", path = "/api/agent/tasks/{taskId}", purpose = "Agent action endpoint: move status, comment, assign/unassign, or set assignment role." },
+        new { method = "DELETE", path = "/api/agents/{agentId}", purpose = "Delete a global agent and clear project/task links." },
         new { method = "PATCH", path = "/api/project-agents/{projectAgentId}", purpose = "Change an agent role on a project, for example worker/reviewer/manager." },
         new { method = "PATCH", path = "/api/agent/project-agents/{projectAgentId}", purpose = "Agent action endpoint: change or remove a project-agent role." },
         new { method = "POST", path = "/api/scheduler/tick", purpose = "Force one scheduler scan." }
@@ -781,6 +782,34 @@ app.MapPatch("/api/agents/{agentId}", async (JsonDataStore store, string agentId
     .WithTags("Agents")
     .WithSummary("Update global agent")
     .WithDescription("Updates an agent profile, provider configuration, model, avatar/logo, Docker image, command template, system prompt, enabled flag, or environment values.");
+
+app.MapDelete("/api/agents/{agentId}", async (JsonDataStore store, string agentId, CancellationToken cancellationToken) =>
+{
+    var removed = await store.MutateAsync(state =>
+    {
+        var agent = state.Agents.FirstOrDefault(a => a.Id == agentId);
+        if (agent is null)
+        {
+            return false;
+        }
+
+        state.Agents.Remove(agent);
+        state.ProjectAgents.RemoveAll(projectAgent => projectAgent.AgentId == agentId);
+
+        foreach (var task in state.Tasks.Where(task => task.AssigneeAgentId == agentId))
+        {
+            task.AssigneeAgentId = null;
+            task.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
+        return true;
+    }, cancellationToken);
+
+    return removed ? Results.NoContent() : Results.NotFound();
+})
+    .WithTags("Agents")
+    .WithSummary("Delete global agent")
+    .WithDescription("Deletes a global agent profile, removes it from all projects, and clears task assignments to that agent. Historical comments and runs are kept for audit context.");
 
 app.MapPost("/api/projects/{projectId}/agents", async (JsonDataStore store, string projectId, ProjectAgentRequest request, CancellationToken cancellationToken) =>
 {
