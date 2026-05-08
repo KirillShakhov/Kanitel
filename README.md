@@ -5,7 +5,7 @@ Kanitel is a single-container kanban workspace for assigning repository tasks to
 - `apps/api` - ASP.NET Core API, static frontend host, JSON persistence, scheduler, Docker runner.
 - `apps/web` - React + Vite board UI.
 
-The UI supports multiple projects, configurable columns, project members, linked HTTP/SSH repositories, global agent profiles, per-project agent roles, task comments, agent avatars/logos, and light/dark themes.
+The UI supports multiple projects, configurable columns, project members, linked HTTP/SSH repositories, global agent profiles, task comments, agent avatars/logos, and light/dark themes.
 
 ## Run With Docker
 
@@ -27,7 +27,24 @@ Useful environment variables:
 - `KANITEL_PUBLIC_API_URL=http://host.docker.internal:8080`
 - `KANITEL_DOCKER_ADD_HOST_GATEWAY=true`
 
-Provider API keys are not stored by default. Agent profiles refer to environment variable names like `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `CODEX_API_KEY`; pass those variables into the Kanitel container and they will be forwarded to agent containers.
+Initial global agents can be declared in `.env` with indexed blocks:
+
+```dotenv
+AGENT_0_NAME=Codex
+AGENT_0_PROVIDER=codex
+AGENT_0_API_URL=https://chatgpt.com/backend-api/codex
+AGENT_0_API_KEY=
+AGENT_0_MODEL=codexplan
+
+AGENT_1_NAME=Claude
+AGENT_1_PROVIDER=anthropic
+AGENT_1_API_URL=https://api.anthropic.com
+AGENT_1_API_KEY=
+AGENT_1_MODEL=claude-sonnet-4-6
+```
+
+Use `AGENT_2_*`, `AGENT_3_*`, and so on for more agents. Empty agent blocks are ignored. These env agents are imported when Kanitel creates a new data file; after that, manage agents in the UI.
+`AGENT_N_API_KEY` is forwarded from the Kanitel host process to the agent container under the provider's expected key name; use `AGENT_N_API_KEY_ENV` only when you need to override that target variable name.
 
 ## Agent And Manager API
 
@@ -47,10 +64,10 @@ curl -s -X POST "$KANITEL_API_URL/api/agent/tasks/$KANITEL_TASK_ID/comments" \
 
 curl -s -X PATCH "$KANITEL_API_URL/api/agent/tasks/$KANITEL_TASK_ID" \
   -H "Content-Type: application/json" \
-  -d "{\"agentId\":\"$KANITEL_AGENT_ID\",\"columnName\":\"Review\",\"assignmentRole\":\"manager\",\"body\":\"Moved to review.\"}"
+  -d "{\"agentId\":\"$KANITEL_AGENT_ID\",\"columnName\":\"Review\",\"body\":\"Moved to review.\"}"
 ```
 
-The scheduler starts an agent when a task is assigned to that agent and the latest task comment is not authored by that same agent. Agents can comment, move task status by column name/id, assign another linked agent, set `assignmentRole` to `manager`, or clear assignment with `unassignAgent=true`.
+The scheduler starts an agent when a task is assigned to that agent and the latest task comment is not authored by that same agent. Agents can comment, move task status by column name/id, assign another linked agent, or clear assignment with `unassignAgent=true`.
 
 ## Local Development
 

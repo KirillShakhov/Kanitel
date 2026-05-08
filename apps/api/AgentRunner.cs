@@ -227,6 +227,14 @@ public sealed class DockerAgentRunner(
             }
         }
 
+        var providerApiKey = ResolveAgentApiKey(agent);
+        if (!string.IsNullOrWhiteSpace(providerApiKey) &&
+            !string.IsNullOrWhiteSpace(agent.ApiKeyEnvName) &&
+            !env.ContainsKey(agent.ApiKeyEnvName))
+        {
+            env[agent.ApiKeyEnvName] = providerApiKey;
+        }
+
         switch ((agent.ProviderPresetId, agent.Provider))
         {
             case ("anthropic", _):
@@ -268,12 +276,11 @@ public sealed class DockerAgentRunner(
                 env["CLAUDE_CODE_USE_OPENAI"] = "1";
                 env["OPENAI_BASE_URL"] = agent.BaseUrl;
                 env["OPENAI_MODEL"] = agent.Model;
-                var apiKey = ResolveHostEnv(agent.ApiKeyEnvName);
-                if (!string.IsNullOrWhiteSpace(apiKey) &&
+                if (!string.IsNullOrWhiteSpace(providerApiKey) &&
                     !env.ContainsKey("OPENAI_API_KEY") &&
                     !string.Equals(agent.ApiKeyEnvName, "OPENAI_API_KEY", StringComparison.OrdinalIgnoreCase))
                 {
-                    env["OPENAI_API_KEY"] = apiKey;
+                    env["OPENAI_API_KEY"] = providerApiKey;
                 }
                 break;
         }
@@ -423,6 +430,11 @@ public sealed class DockerAgentRunner(
         return string.IsNullOrWhiteSpace(envName)
             ? null
             : Environment.GetEnvironmentVariable(envName);
+    }
+
+    private static string? ResolveAgentApiKey(AgentProfile agent)
+    {
+        return ResolveHostEnv(agent.ApiKeySourceEnvName) ?? ResolveHostEnv(agent.ApiKeyEnvName);
     }
 
     private static readonly string[] KnownProviderEnvNames =

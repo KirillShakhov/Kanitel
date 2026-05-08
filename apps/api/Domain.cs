@@ -85,6 +85,7 @@ public sealed class AgentProfile
     public string BaseUrl { get; set; } = "https://chatgpt.com/backend-api/codex";
     public string Model { get; set; } = "codexplan";
     public string ApiKeyEnvName { get; set; } = "CODEX_API_KEY";
+    public string ApiKeySourceEnvName { get; set; } = "";
     public string ContainerImage { get; set; } = "node:22-bookworm";
     public string CommandTemplate { get; set; } = "npx -y @gitlawb/openclaude@latest --print \"$(cat \\\"$KANITEL_TASK_PROMPT_FILE\\\")\"";
     public string SystemPrompt { get; set; } = "";

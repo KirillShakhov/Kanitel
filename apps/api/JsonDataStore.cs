@@ -13,12 +13,14 @@ public sealed class JsonDataStore
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
+    private readonly IConfiguration _configuration;
     private readonly string _path;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private KanitelState? _state;
 
     public JsonDataStore(IConfiguration configuration, IWebHostEnvironment environment)
     {
+        _configuration = configuration;
         _path = configuration["KANITEL_DATA_PATH"]
             ?? Environment.GetEnvironmentVariable("KANITEL_DATA_PATH")
             ?? Path.Combine(environment.ContentRootPath, "data", "kanitel.json");
@@ -64,14 +66,14 @@ public sealed class JsonDataStore
 
         if (!File.Exists(_path))
         {
-            _state = SeedState();
+            _state = SeedState(_configuration);
             await SaveAsync(_state, cancellationToken);
             return;
         }
 
         await using var stream = File.OpenRead(_path);
         _state = await JsonSerializer.DeserializeAsync<KanitelState>(stream, JsonOptions, cancellationToken)
-            ?? SeedState();
+            ?? SeedState(_configuration);
         Normalize(_state);
     }
 
@@ -118,6 +120,7 @@ public sealed class JsonDataStore
             agent.Environment ??= [];
             agent.ToolTags ??= [];
             agent.AvatarUrl ??= "";
+            agent.ApiKeySourceEnvName ??= "";
         }
 
         foreach (var person in state.People)
@@ -134,7 +137,7 @@ public sealed class JsonDataStore
         }
     }
 
-    private static KanitelState SeedState()
+    private static KanitelState SeedState(IConfiguration configuration)
     {
         var project = new Project
         {
@@ -176,7 +179,7 @@ public sealed class JsonDataStore
             [
                 new ProjectMember { ProjectId = project.Id, PersonId = owner.Id }
             ],
-            Agents = [],
+            Agents = EnvAgentCatalog.Read(configuration),
             ProjectAgents = [],
             Tasks = [firstTask],
             Comments =

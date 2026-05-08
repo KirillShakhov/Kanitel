@@ -15,6 +15,11 @@ internal static class EndpointHelpers
     internal static KanitelState SanitizeForClient(KanitelState state)
     {
         state.Accounts = [];
+        foreach (var agent in state.Agents)
+        {
+            agent.ApiKeySourceEnvName = "";
+        }
+
         return state;
     }
 
