@@ -11,9 +11,7 @@ import {
   LogOut,
   MessageSquare,
   Moon,
-  Play,
   Plus,
-  RefreshCw,
   Save,
   Settings,
   Sun,
@@ -133,12 +131,10 @@ const labels = {
     navProjects: 'Проекты',
     navSettings: 'Настройки',
     project: 'Проект',
-    refreshTitle: 'Обновить',
     darkThemeTitle: 'Темная тема',
     lightThemeTitle: 'Светлая тема',
     languageTitle: 'Switch to English',
     languageButton: 'EN',
-    checkNow: 'Проверить',
     logout: 'Выйти',
     schedulerInfo: (runner: string, seconds: number) => `${runner} · ${seconds}s · API /api/openapi.json`,
     newProject: 'Новый проект',
@@ -233,12 +229,10 @@ const labels = {
     navProjects: 'Projects',
     navSettings: 'Settings',
     project: 'Project',
-    refreshTitle: 'Refresh',
     darkThemeTitle: 'Dark theme',
     lightThemeTitle: 'Light theme',
     languageTitle: 'Переключить на русский',
     languageButton: 'RU',
-    checkNow: 'Check now',
     logout: 'Log out',
     schedulerInfo: (runner: string, seconds: number) => `${runner} · ${seconds}s · API /api/openapi.json`,
     newProject: 'New project',
@@ -764,19 +758,12 @@ export default function App() {
               ))}
             </select>
           )}
-          <button className="icon-button" title={t.refreshTitle} onClick={() => mutate(refresh())} disabled={busy}>
-            <RefreshCw size={18} />
-          </button>
           <button className="icon-button" title={theme === 'dark' ? t.lightThemeTitle : t.darkThemeTitle} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
             {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           </button>
           <button className="language-button" title={t.languageTitle} onClick={() => setLocale(locale === 'ru' ? 'en' : 'ru')}>
             <Languages size={16} />
             {t.languageButton}
-          </button>
-          <button className="primary-button" onClick={() => mutate(postJson('/api/scheduler/tick', {}))} disabled={busy}>
-            <Play size={16} />
-            {t.checkNow}
           </button>
           <div className="user-chip">
             <Avatar name={currentUser.displayName} url={currentUser.avatarUrl} />
