@@ -1,7 +1,9 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Reflection;
 using Kanitel.Api;
+using Microsoft.OpenApi;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -15,13 +17,64 @@ builder.Services.AddSingleton<JsonDataStore>();
 builder.Services.AddSingleton<IAgentRunner, DockerAgentRunner>();
 builder.Services.AddSingleton<AgentScheduler>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AgentScheduler>());
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(options =>
+{
+    var xmlPath = Path.Combine(AppContext.BaseDirectory, $"{Assembly.GetExecutingAssembly().GetName().Name}.xml");
+    if (File.Exists(xmlPath))
+    {
+        options.IncludeXmlComments(xmlPath);
+    }
+
+    options.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "Kanitel API",
+        Version = "v1",
+        Description = """
+        Kanitel API for the kanban board, projects, participants, AI agents, and external AI managers.
+
+        Authentication is local token-based auth. Register or login, copy the returned `token`,
+        then click Authorize and paste the token value. Swagger sends it as `Authorization: Bearer <token>`.
+
+        Task automation rule: the scheduler starts an enabled project agent only when the task is
+        assigned to that agent and the latest task comment is not from that same agent or the system.
+        """,
+        Contact = new OpenApiContact
+        {
+            Name = "Kanitel local workspace"
+        }
+    });
+
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "opaque-token",
+        Description = "Paste the raw token returned by login/register. Swagger sends it as `Authorization: Bearer <token>`."
+    });
+});
 
 var app = builder.Build();
+
+app.UseSwagger();
+app.UseSwaggerUI(options =>
+{
+    options.DocumentTitle = "Kanitel API Docs";
+    options.SwaggerEndpoint("/swagger/v1/swagger.json", "Kanitel API v1");
+    options.RoutePrefix = "swagger";
+    options.DisplayRequestDuration();
+    options.EnableTryItOutByDefault();
+});
 
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
-app.MapGet("/api/health", () => Results.Ok(new { status = "ok", time = DateTimeOffset.UtcNow }));
+app.MapGet("/api/health", () => Results.Ok(new { status = "ok", time = DateTimeOffset.UtcNow }))
+    .WithTags("System")
+    .WithSummary("Health check")
+    .WithDescription("Returns the current API status and server timestamp. Use this from Docker, reverse proxies, or local scripts to verify that the API is alive.");
 
 app.MapGet("/api/openapi.json", () => Results.Ok(new
 {
@@ -45,7 +98,10 @@ app.MapGet("/api/openapi.json", () => Results.Ok(new
         new { method = "PATCH", path = "/api/agent/project-agents/{projectAgentId}", purpose = "Agent action endpoint: change or remove a project-agent role." },
         new { method = "POST", path = "/api/scheduler/tick", purpose = "Force one scheduler scan." }
     }
-}));
+}))
+    .WithTags("System")
+    .WithSummary("Legacy lightweight API index")
+    .WithDescription("Returns a compact hand-written endpoint index kept for simple AI manager discovery. The full Swagger/OpenAPI document is available at `/swagger/v1/swagger.json` and the UI at `/swagger`.");
 
 app.MapGet("/api/bootstrap", async (JsonDataStore store, IConfiguration configuration, HttpRequest httpRequest) =>
 {
@@ -64,7 +120,10 @@ app.MapGet("/api/bootstrap", async (JsonDataStore store, IConfiguration configur
             intervalSeconds = ReadInt(configuration, "KANITEL_AGENT_POLL_INTERVAL_SECONDS", 20)
         }
     });
-});
+})
+    .WithTags("System")
+    .WithSummary("Load application bootstrap")
+    .WithDescription("Returns the sanitized board state, current user if a bearer token is provided, provider presets copied from OpenClaude, agent templates, and scheduler settings. Account password hashes are never returned.");
 
 app.MapPost("/api/auth/register", async (JsonDataStore store, AuthRegisterRequest request, CancellationToken cancellationToken) =>
 {
@@ -142,7 +201,10 @@ app.MapPost("/api/auth/register", async (JsonDataStore store, AuthRegisterReques
     }, cancellationToken);
 
     return result is null ? Results.Conflict(new { error = "Account already exists." }) : Results.Ok(result);
-});
+})
+    .WithTags("Auth")
+    .WithSummary("Register a local user")
+    .WithDescription("Creates a local account, creates or updates the matching person profile, returns an auth token, and grants the first registered account owner access to the seed project.");
 
 app.MapPost("/api/auth/login", async (JsonDataStore store, AuthLoginRequest request, CancellationToken cancellationToken) =>
 {
@@ -168,14 +230,20 @@ app.MapPost("/api/auth/login", async (JsonDataStore store, AuthLoginRequest requ
     }, cancellationToken);
 
     return result is null ? Results.Unauthorized() : Results.Ok(result);
-});
+})
+    .WithTags("Auth")
+    .WithSummary("Login")
+    .WithDescription("Validates email and password, rotates the session token, and returns the token with the linked person profile. Use the returned token as `Bearer <token>` in Swagger Authorize.");
 
 app.MapGet("/api/auth/me", async (JsonDataStore store, HttpRequest httpRequest, CancellationToken cancellationToken) =>
 {
     var state = await store.SnapshotAsync(cancellationToken);
     var currentUser = FindCurrentUser(state, httpRequest);
     return currentUser is null ? Results.Unauthorized() : Results.Ok(currentUser);
-});
+})
+    .WithTags("Auth")
+    .WithSummary("Read current profile")
+    .WithDescription("Reads the current person profile from the bearer token or `X-Kanitel-Token` header. Returns 401 when the token is missing or invalid.");
 
 app.MapPatch("/api/auth/me", async (JsonDataStore store, HttpRequest httpRequest, ProfileRequest request, CancellationToken cancellationToken) =>
 {
@@ -240,13 +308,19 @@ app.MapPatch("/api/auth/me", async (JsonDataStore store, HttpRequest httpRequest
     }, cancellationToken);
 
     return result is null ? Results.BadRequest(new { error = "Profile could not be updated." }) : Results.Ok(result);
-});
+})
+    .WithTags("Auth")
+    .WithSummary("Update current profile")
+    .WithDescription("Updates the authenticated user's display name, email, avatar URL, or password. Password updates require at least six characters; blank password leaves it unchanged.");
 
 app.MapPost("/api/scheduler/tick", async (AgentScheduler scheduler, CancellationToken cancellationToken) =>
 {
     var result = await scheduler.ScanOnceAsync(cancellationToken);
     return Results.Ok(result);
-});
+})
+    .WithTags("Scheduler")
+    .WithSummary("Run one scheduler scan")
+    .WithDescription("Forces an immediate scan for tasks that need agent action. The scheduler queues a run only when the assignee is an enabled project agent and the latest task comment is not from that agent or from the system.");
 
 app.MapPost("/api/projects", async (JsonDataStore store, ProjectRequest request, CancellationToken cancellationToken) =>
 {
@@ -288,7 +362,10 @@ app.MapPost("/api/projects", async (JsonDataStore store, ProjectRequest request,
     }, cancellationToken);
 
     return Results.Ok(created);
-});
+})
+    .WithTags("Projects")
+    .WithSummary("Create project")
+    .WithDescription("Creates a project with the default kanban workflow columns: Backlog, Ready, In Progress, Review, and Done. Add people and agents as participants through the participant endpoints.");
 
 app.MapPatch("/api/projects/{projectId}", async (JsonDataStore store, string projectId, ProjectRequest request, CancellationToken cancellationToken) =>
 {
@@ -314,7 +391,10 @@ app.MapPatch("/api/projects/{projectId}", async (JsonDataStore store, string pro
     }, cancellationToken);
 
     return updated is null ? Results.NotFound() : Results.Ok(updated);
-});
+})
+    .WithTags("Projects")
+    .WithSummary("Update project")
+    .WithDescription("Updates a project's name and description. Columns, repositories, people, and agents are intentionally managed through separate endpoints.");
 
 app.MapPost("/api/projects/{projectId}/columns", async (JsonDataStore store, string projectId, ColumnRequest request, CancellationToken cancellationToken) =>
 {
@@ -339,7 +419,10 @@ app.MapPost("/api/projects/{projectId}/columns", async (JsonDataStore store, str
     }, cancellationToken);
 
     return created is null ? Results.BadRequest() : Results.Ok(created);
-});
+})
+    .WithTags("Board")
+    .WithSummary("Create board column")
+    .WithDescription("Adds a configurable kanban column to a project. Columns are ordered by position; omitted position appends the new column to the end.");
 
 app.MapPatch("/api/columns/{columnId}", async (JsonDataStore store, string columnId, ColumnRequest request, CancellationToken cancellationToken) =>
 {
@@ -376,7 +459,10 @@ app.MapPatch("/api/columns/{columnId}", async (JsonDataStore store, string colum
     }, cancellationToken);
 
     return updated is null ? Results.NotFound() : Results.Ok(updated);
-});
+})
+    .WithTags("Board")
+    .WithSummary("Update board column")
+    .WithDescription("Updates a column name, color, WIP limit, or position. When position changes, Kanitel normalizes the project's column order.");
 
 app.MapDelete("/api/columns/{columnId}", async (JsonDataStore store, string columnId, CancellationToken cancellationToken) =>
 {
@@ -409,7 +495,10 @@ app.MapDelete("/api/columns/{columnId}", async (JsonDataStore store, string colu
     }, cancellationToken);
 
     return deleted ? Results.NoContent() : Results.NotFound();
-});
+})
+    .WithTags("Board")
+    .WithSummary("Delete board column")
+    .WithDescription("Deletes a column when the project has another fallback column. Existing tasks are moved to the first remaining column before positions are normalized.");
 
 app.MapPost("/api/people", async (JsonDataStore store, PersonRequest request, CancellationToken cancellationToken) =>
 {
@@ -431,7 +520,10 @@ app.MapPost("/api/people", async (JsonDataStore store, PersonRequest request, Ca
     }, cancellationToken);
 
     return Results.Ok(person);
-});
+})
+    .WithTags("Participants")
+    .WithSummary("Create person")
+    .WithDescription("Creates a standalone person profile. A person can later be added to one or more projects as a participant.");
 
 app.MapPost("/api/projects/{projectId}/members", async (JsonDataStore store, string projectId, MemberRequest request, CancellationToken cancellationToken) =>
 {
@@ -485,7 +577,10 @@ app.MapPost("/api/projects/{projectId}/members", async (JsonDataStore store, str
     }, cancellationToken);
 
     return result is null ? Results.BadRequest() : Results.Ok(result);
-});
+})
+    .WithTags("Participants")
+    .WithSummary("Add or update project person")
+    .WithDescription("Adds a person to a project by existing person id or by email/display name. If the person is already a member, this updates the project role.");
 
 app.MapPatch("/api/members/{memberId}", async (JsonDataStore store, string memberId, MemberRequest request, CancellationToken cancellationToken) =>
 {
@@ -506,7 +601,10 @@ app.MapPatch("/api/members/{memberId}", async (JsonDataStore store, string membe
     }, cancellationToken);
 
     return updated is null ? Results.NotFound() : Results.Ok(updated);
-});
+})
+    .WithTags("Participants")
+    .WithSummary("Update project person role")
+    .WithDescription("Updates the role of a human participant in a project. Common roles are viewer, editor, worker, reviewer, manager, and owner.");
 
 app.MapDelete("/api/members/{memberId}", async (JsonDataStore store, string memberId, CancellationToken cancellationToken) =>
 {
@@ -523,7 +621,10 @@ app.MapDelete("/api/members/{memberId}", async (JsonDataStore store, string memb
     }, cancellationToken);
 
     return removed ? Results.NoContent() : Results.NotFound();
-});
+})
+    .WithTags("Participants")
+    .WithSummary("Remove project person")
+    .WithDescription("Removes a human participant from a project. The underlying person profile remains available for other projects.");
 
 app.MapPost("/api/projects/{projectId}/repositories", async (JsonDataStore store, string projectId, RepositoryRequest request, CancellationToken cancellationToken) =>
 {
@@ -547,7 +648,10 @@ app.MapPost("/api/projects/{projectId}/repositories", async (JsonDataStore store
     }, cancellationToken);
 
     return created is null ? Results.BadRequest() : Results.Ok(created);
-});
+})
+    .WithTags("Repositories")
+    .WithSummary("Link repository")
+    .WithDescription("Links an HTTP(S) or SSH Git repository to a project. Agent workspaces clone linked repositories before running a task.");
 
 app.MapPatch("/api/repositories/{repoId}", async (JsonDataStore store, string repoId, RepositoryRequest request, CancellationToken cancellationToken) =>
 {
@@ -567,7 +671,10 @@ app.MapPatch("/api/repositories/{repoId}", async (JsonDataStore store, string re
     }, cancellationToken);
 
     return updated is null ? Results.NotFound() : Results.Ok(updated);
-});
+})
+    .WithTags("Repositories")
+    .WithSummary("Update repository link")
+    .WithDescription("Updates repository display name, URL, branch, or auth mode. Auth mode is normally `http` or `ssh`.");
 
 app.MapDelete("/api/repositories/{repoId}", async (JsonDataStore store, string repoId, CancellationToken cancellationToken) =>
 {
@@ -584,7 +691,10 @@ app.MapDelete("/api/repositories/{repoId}", async (JsonDataStore store, string r
     }, cancellationToken);
 
     return removed ? Results.NoContent() : Results.NotFound();
-});
+})
+    .WithTags("Repositories")
+    .WithSummary("Remove repository link")
+    .WithDescription("Removes a repository from the project. Existing agent workspaces are not deleted.");
 
 app.MapPost("/api/agents", async (JsonDataStore store, AgentRequest request, CancellationToken cancellationToken) =>
 {
@@ -619,7 +729,10 @@ app.MapPost("/api/agents", async (JsonDataStore store, AgentRequest request, Can
     }, cancellationToken);
 
     return created is null ? Results.BadRequest() : Results.Ok(created);
-});
+})
+    .WithTags("Agents")
+    .WithSummary("Create global agent")
+    .WithDescription("Creates a global AI agent profile from an OpenClaude provider preset and template. Agents are not project-specific until added to a project as participants.");
 
 app.MapPatch("/api/agents/{agentId}", async (JsonDataStore store, string agentId, AgentRequest request, CancellationToken cancellationToken) =>
 {
@@ -664,7 +777,10 @@ app.MapPatch("/api/agents/{agentId}", async (JsonDataStore store, string agentId
     }, cancellationToken);
 
     return updated is null ? Results.NotFound() : Results.Ok(updated);
-});
+})
+    .WithTags("Agents")
+    .WithSummary("Update global agent")
+    .WithDescription("Updates an agent profile, provider configuration, model, avatar/logo, Docker image, command template, system prompt, enabled flag, or environment values.");
 
 app.MapPost("/api/projects/{projectId}/agents", async (JsonDataStore store, string projectId, ProjectAgentRequest request, CancellationToken cancellationToken) =>
 {
@@ -693,7 +809,10 @@ app.MapPost("/api/projects/{projectId}/agents", async (JsonDataStore store, stri
     }, cancellationToken);
 
     return linked is null ? Results.BadRequest() : Results.Ok(linked);
-});
+})
+    .WithTags("Participants")
+    .WithSummary("Add or update project agent")
+    .WithDescription("Adds a global agent to a project as a participant. If already linked, updates the agent's project role. Project agents can be assigned tasks like people.");
 
 app.MapPatch("/api/project-agents/{projectAgentId}", async (JsonDataStore store, string projectAgentId, ProjectAgentPatchRequest request, CancellationToken cancellationToken) =>
 {
@@ -714,7 +833,10 @@ app.MapPatch("/api/project-agents/{projectAgentId}", async (JsonDataStore store,
     }, cancellationToken);
 
     return updated is null ? Results.NotFound() : Results.Ok(updated);
-});
+})
+    .WithTags("Participants")
+    .WithSummary("Update project agent role")
+    .WithDescription("Updates the role of an agent participant in a project. Agents can use separate action endpoints to change or remove roles when allowed.");
 
 app.MapDelete("/api/project-agents/{projectAgentId}", async (JsonDataStore store, string projectAgentId, CancellationToken cancellationToken) =>
 {
@@ -731,7 +853,10 @@ app.MapDelete("/api/project-agents/{projectAgentId}", async (JsonDataStore store
     }, cancellationToken);
 
     return removed ? Results.NoContent() : Results.NotFound();
-});
+})
+    .WithTags("Participants")
+    .WithSummary("Remove project agent")
+    .WithDescription("Removes an agent participant from a project. The global agent profile remains configured and can be added to other projects.");
 
 app.MapPost("/api/projects/{projectId}/tasks", async (JsonDataStore store, string projectId, TaskRequest request, CancellationToken cancellationToken) =>
 {
@@ -776,7 +901,10 @@ app.MapPost("/api/projects/{projectId}/tasks", async (JsonDataStore store, strin
     }, cancellationToken);
 
     return created is null ? Results.BadRequest() : Results.Ok(created);
-});
+})
+    .WithTags("Tasks")
+    .WithSummary("Create task")
+    .WithDescription("Creates a task card in a project column, assigns it to either a person or an agent, and writes the initial conversation comment. Agent assignment can trigger the scheduler after a non-agent comment.");
 
 app.MapPatch("/api/tasks/{taskId}", async (JsonDataStore store, string taskId, TaskRequest request, CancellationToken cancellationToken) =>
 {
@@ -823,7 +951,10 @@ app.MapPatch("/api/tasks/{taskId}", async (JsonDataStore store, string taskId, T
     }, cancellationToken);
 
     return updated is null ? Results.NotFound() : Results.Ok(updated);
-});
+})
+    .WithTags("Tasks")
+    .WithSummary("Update task")
+    .WithDescription("Updates title, description, status column, assignee, assignment role, priority, or position. Drag-and-drop uses this endpoint by changing `columnId` and `position`.");
 
 app.MapPost("/api/tasks/{taskId}/comments", async (JsonDataStore store, string taskId, CommentRequest request, CancellationToken cancellationToken) =>
 {
@@ -848,7 +979,10 @@ app.MapPost("/api/tasks/{taskId}/comments", async (JsonDataStore store, string t
     }, cancellationToken);
 
     return created is null ? Results.BadRequest() : Results.Ok(created);
-});
+})
+    .WithTags("Tasks")
+    .WithSummary("Add task comment")
+    .WithDescription("Adds a human, agent, or system comment to a task. Human comments assigned to an agent can make the scheduler pick up the task.");
 
 app.MapPost("/api/agent/tasks/{taskId}/comments", async (JsonDataStore store, string taskId, AgentCommentRequest request, CancellationToken cancellationToken) =>
 {
@@ -876,7 +1010,10 @@ app.MapPost("/api/agent/tasks/{taskId}/comments", async (JsonDataStore store, st
     }, cancellationToken);
 
     return created is null ? Results.BadRequest(new { error = "Agent cannot comment on this task." }) : Results.Ok(created);
-});
+})
+    .WithTags("Agent Actions")
+    .WithSummary("Agent comment")
+    .WithDescription("Allows an enabled agent that is linked to the project to comment as itself. This is the safe endpoint for containerized agents to report progress or final results.");
 
 app.MapPatch("/api/agent/tasks/{taskId}", async (JsonDataStore store, string taskId, AgentTaskActionRequest request, CancellationToken cancellationToken) =>
 {
@@ -961,7 +1098,10 @@ app.MapPatch("/api/agent/tasks/{taskId}", async (JsonDataStore store, string tas
     }, cancellationToken);
 
     return result is null ? Results.BadRequest(new { error = "Agent cannot update this task." }) : Results.Ok(result);
-});
+})
+    .WithTags("Agent Actions")
+    .WithSummary("Agent task action")
+    .WithDescription("Allows a linked agent to update a task: move it by column id or column name, add a comment body, reassign to another allowed agent, unassign itself, update assignment role, priority, title, or description.");
 
 app.MapPatch("/api/agent/project-agents/{projectAgentId}", async (JsonDataStore store, string projectAgentId, AgentProjectAgentActionRequest request, CancellationToken cancellationToken) =>
 {
@@ -990,7 +1130,10 @@ app.MapPatch("/api/agent/project-agents/{projectAgentId}", async (JsonDataStore 
     }, cancellationToken);
 
     return result is null ? Results.BadRequest(new { error = "Agent cannot update this project role." }) : Results.Ok(result);
-});
+})
+    .WithTags("Agent Actions")
+    .WithSummary("Agent project role action")
+    .WithDescription("Allows a linked agent to update or remove an agent participant role in the same project. This supports AI manager workflows where an agent promotes another agent to manager or removes an assignment.");
 
 var indexPath = Path.Combine(app.Environment.WebRootPath ?? "", "index.html");
 if (File.Exists(indexPath))
@@ -1133,24 +1276,49 @@ static bool CanAgentActOnProject(KanitelState state, string projectId, string ag
             projectAgent.AgentId == normalizedAgentId);
 }
 
+/// <summary>Project create/update payload.</summary>
+/// <param name="Name">Human-readable project name. Required when creating.</param>
+/// <param name="Description">Optional project description shown in the UI.</param>
 public sealed record ProjectRequest(string Name, string? Description);
 
+/// <summary>Registration payload for a local Kanitel account.</summary>
+/// <param name="DisplayName">Name displayed in comments, task authors, and project participants.</param>
+/// <param name="Email">Unique login email. Stored normalized to lowercase.</param>
+/// <param name="Password">Plain password for registration. Must be at least six characters.</param>
+/// <param name="AvatarUrl">Optional avatar image URL for the linked person profile.</param>
 public sealed record AuthRegisterRequest(
     string DisplayName,
     string Email,
     string Password,
     string? AvatarUrl);
 
+/// <summary>Login payload for local token authentication.</summary>
+/// <param name="Email">Account email.</param>
+/// <param name="Password">Account password.</param>
 public sealed record AuthLoginRequest(string Email, string Password);
 
+/// <summary>Authenticated profile update payload.</summary>
+/// <param name="DisplayName">New display name. Blank values are ignored.</param>
+/// <param name="Email">New unique email. Blank values are ignored.</param>
+/// <param name="AvatarUrl">New avatar URL. Empty string clears the avatar.</param>
+/// <param name="Password">New password. Blank values leave the password unchanged.</param>
 public sealed record ProfileRequest(
     string? DisplayName,
     string? Email,
     string? AvatarUrl,
     string? Password);
 
+/// <summary>Authentication response containing the bearer token and person profile.</summary>
+/// <param name="Token">Opaque session token. Send it as Authorization: Bearer token.</param>
+/// <param name="Person">Linked user profile.</param>
 public sealed record AuthResponse(string Token, Person Person);
 
+/// <summary>Board column create/update payload.</summary>
+/// <param name="Name">Column name shown on the kanban board.</param>
+/// <param name="Color">CSS color used as the column accent.</param>
+/// <param name="Position">Zero-based position for ordering columns.</param>
+/// <param name="WipLimit">Optional work-in-progress limit displayed in the header.</param>
+/// <param name="WipLimitSet">Set true when the client intentionally updates the WIP limit, including clearing it.</param>
 public sealed record ColumnRequest(
     string? Name,
     string? Color,
@@ -1158,8 +1326,18 @@ public sealed record ColumnRequest(
     int? WipLimit,
     bool WipLimitSet);
 
+/// <summary>Standalone person profile payload.</summary>
+/// <param name="DisplayName">Person name.</param>
+/// <param name="Email">Optional contact email.</param>
+/// <param name="AvatarUrl">Optional avatar image URL.</param>
 public sealed record PersonRequest(string DisplayName, string? Email, string? AvatarUrl);
 
+/// <summary>Project human participant payload.</summary>
+/// <param name="PersonId">Existing person id. If omitted, Kanitel can create or find a person by email.</param>
+/// <param name="DisplayName">Name for a new person when PersonId is omitted.</param>
+/// <param name="Email">Email used to find or create a person.</param>
+/// <param name="AvatarUrl">Optional avatar URL for the person profile.</param>
+/// <param name="Role">Project role such as viewer, editor, worker, reviewer, manager, or owner.</param>
 public sealed record MemberRequest(
     string? PersonId,
     string? DisplayName,
@@ -1167,12 +1345,31 @@ public sealed record MemberRequest(
     string? AvatarUrl,
     string? Role);
 
+/// <summary>Git repository link payload.</summary>
+/// <param name="Name">Display name. Defaults to the URL when omitted.</param>
+/// <param name="Url">HTTP(S) or SSH Git URL.</param>
+/// <param name="Branch">Optional branch to clone with depth 1.</param>
+/// <param name="AuthMode">Authentication mode. Usually http or ssh; inferred when omitted on create.</param>
 public sealed record RepositoryRequest(
     string? Name,
     string Url,
     string? Branch,
     string? AuthMode);
 
+/// <summary>Global AI agent profile payload.</summary>
+/// <param name="Name">Agent display name.</param>
+/// <param name="TemplateId">OpenClaude template id used for default prompt and tool tags.</param>
+/// <param name="AgentType">Internal agent type. Defaults from the selected template.</param>
+/// <param name="AvatarUrl">Agent avatar or provider logo URL.</param>
+/// <param name="ProviderPresetId">OpenClaude provider preset id, for example codex, anthropic, gemini, or github.</param>
+/// <param name="BaseUrl">Provider API base URL.</param>
+/// <param name="Model">Model name passed to the agent runtime.</param>
+/// <param name="ApiKeyEnvName">Host environment variable name containing the provider API key.</param>
+/// <param name="ContainerImage">Docker image used for isolated task workspaces.</param>
+/// <param name="CommandTemplate">Shell command run inside the agent container.</param>
+/// <param name="SystemPrompt">System prompt prepended to the Kanitel task prompt.</param>
+/// <param name="Enabled">When false, the scheduler will not start this agent.</param>
+/// <param name="Environment">Extra environment variables passed to the agent container.</param>
 public sealed record AgentRequest(
     string? Name,
     string? TemplateId,
@@ -1188,10 +1385,27 @@ public sealed record AgentRequest(
     bool? Enabled,
     Dictionary<string, string>? Environment);
 
+/// <summary>Add an existing global agent to a project.</summary>
+/// <param name="AgentId">Global agent id.</param>
+/// <param name="Role">Project role for this agent, such as worker, reviewer, manager, or observer.</param>
 public sealed record ProjectAgentRequest(string AgentId, string? Role);
 
+/// <summary>Project agent role update payload.</summary>
+/// <param name="Role">New project role for the agent participant.</param>
 public sealed record ProjectAgentPatchRequest(string? Role);
 
+/// <summary>Task create/update payload.</summary>
+/// <param name="Title">Task title. Required when creating.</param>
+/// <param name="Description">Task body shown in the modal and sent to agents.</param>
+/// <param name="ColumnId">Board column id. Used as task status.</param>
+/// <param name="AssigneeAgentId">Agent assignee id. Mutually exclusive with AssigneePersonId in normal UI use.</param>
+/// <param name="AssigneePersonId">Human assignee id. Mutually exclusive with AssigneeAgentId in normal UI use.</param>
+/// <param name="AssignmentRole">Role for the assignee on this task, such as worker, reviewer, or manager.</param>
+/// <param name="Priority">Task priority: low, normal, high, or urgent.</param>
+/// <param name="Position">Zero-based order inside the column. Used by drag-and-drop.</param>
+/// <param name="InitialComment">Initial conversation message written when creating a task.</param>
+/// <param name="AuthorType">Initial comment author type: person, agent, or system.</param>
+/// <param name="AuthorId">Initial comment author id.</param>
 public sealed record TaskRequest(
     string? Title,
     string? Description,
@@ -1205,15 +1419,33 @@ public sealed record TaskRequest(
     string? AuthorType,
     string? AuthorId);
 
+/// <summary>Task comment payload.</summary>
+/// <param name="Body">Markdown/plain text comment body.</param>
+/// <param name="AuthorType">Author type: person, agent, or system. Defaults to person.</param>
+/// <param name="AuthorId">Author id. Defaults to owner when omitted.</param>
 public sealed record CommentRequest(
     string Body,
     string? AuthorType,
     string? AuthorId);
 
+/// <summary>Agent self-comment payload.</summary>
+/// <param name="AgentId">Agent id. Must be enabled and linked to the task project.</param>
+/// <param name="Body">Comment body written as that agent.</param>
 public sealed record AgentCommentRequest(
     string AgentId,
     string Body);
 
+/// <summary>Agent task action payload for containerized agents and AI managers.</summary>
+/// <param name="AgentId">Acting agent id. Must be enabled and linked to the task project.</param>
+/// <param name="Body">Optional comment body to append as the agent.</param>
+/// <param name="ColumnId">Target board column id.</param>
+/// <param name="ColumnName">Target board column name when the agent does not know the id.</param>
+/// <param name="AssigneeAgentId">Agent id to assign next. Empty string clears the agent assignment.</param>
+/// <param name="AssignmentRole">New task role, for example manager or reviewer.</param>
+/// <param name="UnassignAgent">When true, clears the current agent assignment and resets role to worker.</param>
+/// <param name="Priority">New priority.</param>
+/// <param name="Title">Optional new title.</param>
+/// <param name="Description">Optional new description.</param>
 public sealed record AgentTaskActionRequest(
     string AgentId,
     string? Body,
@@ -1226,6 +1458,10 @@ public sealed record AgentTaskActionRequest(
     string? Title,
     string? Description);
 
+/// <summary>Agent action for another project-agent role.</summary>
+/// <param name="AgentId">Acting agent id. Must be enabled and linked to the same project.</param>
+/// <param name="Role">New role to assign to the project-agent link.</param>
+/// <param name="Remove">When true, removes the project-agent link instead of updating the role.</param>
 public sealed record AgentProjectAgentActionRequest(
     string AgentId,
     string? Role,
