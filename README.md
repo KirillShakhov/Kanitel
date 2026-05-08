@@ -122,7 +122,9 @@ variable.
 
 For the GitHub Copilot preset, OpenClaude requires a non-interactive `GITHUB_TOKEN`/`GH_TOKEN`
 credential. Kanitel cannot run `/onboard-github` inside a disposable task container. A regular
-GitHub PAT works with GitHub Models endpoints, but not with `https://api.githubcopilot.com`.
+GitHub PAT works with the `github-models` provider (`https://models.github.ai/inference`), but
+not with `https://api.githubcopilot.com`. For GitHub Models, create a PAT with the `models`
+scope and select `GitHub Models (PAT)` in the agent settings.
 
 ## Agent Runtime
 

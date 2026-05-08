@@ -413,8 +413,8 @@ public sealed class DockerAgentRunner(
 
                     Kanitel runs agents in disposable containers, so interactive `/onboard-github`
                     cannot be completed during a task run. Configure this agent with a valid
-                    GITHUB_TOKEN/GH_TOKEN value, or switch the agent provider to OpenAI,
-                    Anthropic, Ollama, LM Studio, or another non-interactive provider.
+                    GITHUB_TOKEN/GH_TOKEN value, or switch the agent provider to GitHub Models (PAT),
+                    OpenAI, Anthropic, Ollama, LM Studio, or another non-interactive provider.
                     """;
             }
         }
@@ -436,7 +436,7 @@ public sealed class DockerAgentRunner(
                     GitHub Copilot API does not accept a regular GitHub PAT for this endpoint.
 
                     Use a Copilot OAuth token produced by OpenClaude `/onboard-github`, or switch
-                    this agent to a provider that supports plain API keys.
+                    this agent to GitHub Models (PAT) with a token that has the `models` scope.
                     """;
             }
         }

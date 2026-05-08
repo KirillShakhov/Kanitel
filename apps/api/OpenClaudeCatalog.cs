@@ -67,10 +67,17 @@ public static class OpenClaudeCatalog
                 ["GEMINI_MODEL"] = "gemini-3-flash-preview"
             }
         },
+        OpenAiCompatible(
+            "github-models",
+            "GitHub Models (PAT)",
+            "https://models.github.ai/inference",
+            "openai/gpt-4.1",
+            "OPENAI_API_KEY",
+            logoDomain: "github.com"),
         new()
         {
             Id = "github",
-            Name = "GitHub Models / Copilot",
+            Name = "GitHub Copilot (OAuth)",
             Provider = "github",
             BaseUrl = "https://api.githubcopilot.com",
             DefaultModel = "github:copilot",
