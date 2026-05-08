@@ -32,6 +32,7 @@ public static class AgentEndpoints
                     ToolTags = template.ToolTags.ToList(),
                     Environment = MergeEnvironment(preset.Environment, request.Environment)
                 };
+                ApplyApiKeyValue(agent.Environment, agent.ApiKeyEnvName, request.ApiKeyValue);
                 state.Agents.Add(agent);
                 return agent;
             }, cancellationToken);
@@ -54,6 +55,19 @@ public static class AgentEndpoints
 
                 if (!string.IsNullOrWhiteSpace(request.Name)) agent.Name = request.Name.Trim();
                 if (!string.IsNullOrWhiteSpace(request.AgentType)) agent.AgentType = request.AgentType.Trim();
+                if (!string.IsNullOrWhiteSpace(request.TemplateId))
+                {
+                    var template = OpenClaudeCatalog.AgentTemplates.FirstOrDefault(t => t.Id == request.TemplateId);
+                    if (template is not null)
+                    {
+                        agent.AgentType = template.AgentType;
+                        agent.ToolTags = template.ToolTags.ToList();
+                        if (request.SystemPrompt is null)
+                        {
+                            agent.SystemPrompt = template.SystemPrompt;
+                        }
+                    }
+                }
                 if (request.AvatarUrl is not null) agent.AvatarUrl = request.AvatarUrl.Trim();
                 if (!string.IsNullOrWhiteSpace(request.ProviderPresetId))
                 {
@@ -81,6 +95,7 @@ public static class AgentEndpoints
                 if (request.SystemPrompt is not null) agent.SystemPrompt = request.SystemPrompt.Trim();
                 if (request.Enabled.HasValue) agent.Enabled = request.Enabled.Value;
                 if (request.Environment is not null) agent.Environment = MergeEnvironment(agent.Environment, request.Environment);
+                ApplyApiKeyValue(agent.Environment, agent.ApiKeyEnvName, request.ApiKeyValue);
                 return agent;
             }, cancellationToken);
 
@@ -119,5 +134,23 @@ public static class AgentEndpoints
             .WithDescription("Deletes a global agent profile, removes it from all projects, and clears task assignments to that agent. Historical comments and runs are kept for audit context.");
 
         return app;
+    }
+
+    private static void ApplyApiKeyValue(Dictionary<string, string> environment, string apiKeyEnvName, string? apiKeyValue)
+    {
+        if (string.IsNullOrWhiteSpace(apiKeyEnvName) || string.IsNullOrWhiteSpace(apiKeyValue))
+        {
+            return;
+        }
+
+        foreach (var key in environment.Keys.ToList())
+        {
+            if (key.Equals(apiKeyEnvName, StringComparison.OrdinalIgnoreCase))
+            {
+                environment.Remove(key);
+            }
+        }
+
+        environment[apiKeyEnvName.Trim()] = apiKeyValue.Trim();
     }
 }

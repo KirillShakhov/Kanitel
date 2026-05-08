@@ -92,6 +92,7 @@ type AgentDraft = {
   model: string
   baseUrl: string
   apiKeyEnvName: string
+  apiKeyValue: string
   containerImage: string
   commandTemplate: string
   systemPrompt: string
@@ -207,6 +208,7 @@ const labels = {
     model: 'Модель',
     baseUrl: 'Base URL',
     apiEnv: 'API env',
+    apiKey: 'API key / токен',
     image: 'Образ',
     command: 'Команда',
     systemPrompt: 'Системный промпт',
@@ -315,6 +317,7 @@ const labels = {
     model: 'Model',
     baseUrl: 'Base URL',
     apiEnv: 'API env',
+    apiKey: 'API key / token',
     image: 'Image',
     command: 'Command',
     systemPrompt: 'System prompt',
@@ -549,21 +552,8 @@ export default function App() {
 
   useEffect(() => {
     if (!selectedAgent) return
-    setAgentDraft({
-      name: selectedAgent.name,
-      templateId: selectedAgent.agentType,
-      avatarUrl: selectedAgent.avatarUrl ?? '',
-      providerPresetId: selectedAgent.providerPresetId,
-      model: selectedAgent.model,
-      baseUrl: selectedAgent.baseUrl,
-      apiKeyEnvName: selectedAgent.apiKeyEnvName,
-      containerImage: selectedAgent.containerImage,
-      commandTemplate: selectedAgent.commandTemplate,
-      systemPrompt: selectedAgent.systemPrompt,
-      enabled: selectedAgent.enabled,
-      environment: envToPairs(selectedAgent.environment)
-    })
-  }, [selectedAgent])
+    setAgentDraft(toAgentDraft(selectedAgent))
+  }, [selectedAgent?.id])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -773,6 +763,7 @@ export default function App() {
       model: preset.defaultModel,
       baseUrl: preset.baseUrl,
       apiKeyEnvName: preset.apiKeyEnvName,
+      apiKeyValue: '',
       environment: envToPairs(preset.environment)
     }))
   }
@@ -2024,10 +2015,14 @@ function AgentForm({
           <input value={draft.apiKeyEnvName} onChange={event => onChange({ ...draft, apiKeyEnvName: event.target.value })} />
         </label>
         <label>
-          {t.image}
-          <input value={draft.containerImage} onChange={event => onChange({ ...draft, containerImage: event.target.value })} />
+          {t.apiKey}
+          <input type="password" value={draft.apiKeyValue} onChange={event => onChange({ ...draft, apiKeyValue: event.target.value })} autoComplete="off" />
         </label>
       </div>
+      <label>
+        {t.image}
+        <input value={draft.containerImage} onChange={event => onChange({ ...draft, containerImage: event.target.value })} />
+      </label>
       <label>
         {t.command}
         <textarea value={draft.commandTemplate} onChange={event => onChange({ ...draft, commandTemplate: event.target.value })} rows={3} />
@@ -2054,19 +2049,20 @@ function EnvEditor({
   draft: AgentDraft
   onChange: (draft: AgentDraft) => void
 }) {
-  const rows = draft.environment
+  const credentialKey = draft.apiKeyEnvName.trim().toLowerCase()
+  const rows = draft.environment.filter(row => row.key.trim().toLowerCase() !== credentialKey)
 
   function updateRow(id: string, patch: Partial<EnvPair>) {
     onChange({
       ...draft,
-      environment: rows.map(row => row.id === id ? { ...row, ...patch } : row)
+      environment: draft.environment.map(row => row.id === id ? { ...row, ...patch } : row)
     })
   }
 
   function removeRow(id: string) {
     onChange({
       ...draft,
-      environment: rows.filter(row => row.id !== id)
+      environment: draft.environment.filter(row => row.id !== id)
     })
   }
 
@@ -2074,7 +2070,7 @@ function EnvEditor({
     <section className="env-editor">
       <header>
         <strong>{t.environment}</strong>
-        <button className="secondary-button compact-text" type="button" onClick={() => onChange({ ...draft, environment: [...rows, newEnvPair()] })}>
+        <button className="secondary-button compact-text" type="button" onClick={() => onChange({ ...draft, environment: [...draft.environment, newEnvPair()] })}>
           <Plus size={15} />
           {t.addEnv}
         </button>
@@ -2389,6 +2385,7 @@ function initialAgentDraft(preset?: ProviderPreset, template?: AgentTemplate): A
     model: selectedPreset.defaultModel,
     baseUrl: selectedPreset.baseUrl,
     apiKeyEnvName: selectedPreset.apiKeyEnvName,
+    apiKeyValue: '',
     containerImage: 'node:22-bookworm',
     commandTemplate: 'npx -y @gitlawb/openclaude@latest --print "$(cat "$KANITEL_TASK_PROMPT_FILE")"',
     systemPrompt: selectedTemplate.systemPrompt,
@@ -2397,7 +2394,34 @@ function initialAgentDraft(preset?: ProviderPreset, template?: AgentTemplate): A
   }
 }
 
+function toAgentDraft(agent: AgentProfile): AgentDraft {
+  return {
+    name: agent.name,
+    templateId: agent.agentType,
+    avatarUrl: agent.avatarUrl ?? '',
+    providerPresetId: agent.providerPresetId,
+    model: agent.model,
+    baseUrl: agent.baseUrl,
+    apiKeyEnvName: agent.apiKeyEnvName,
+    apiKeyValue: readEnvValue(agent.environment, agent.apiKeyEnvName) ?? '',
+    containerImage: agent.containerImage,
+    commandTemplate: agent.commandTemplate,
+    systemPrompt: agent.systemPrompt,
+    enabled: agent.enabled,
+    environment: envToPairs(agent.environment)
+  }
+}
+
 function agentPayload(draft: AgentDraft) {
+  const environment = envPairsToRecord(draft.environment)
+  const apiKeyEnvName = draft.apiKeyEnvName.trim()
+  if (apiKeyEnvName) {
+    deleteEnvKey(environment, apiKeyEnvName)
+    if (draft.apiKeyValue.trim()) {
+      environment[apiKeyEnvName] = draft.apiKeyValue.trim()
+    }
+  }
+
   return {
     name: draft.name,
     templateId: draft.templateId,
@@ -2406,11 +2430,12 @@ function agentPayload(draft: AgentDraft) {
     model: draft.model,
     baseUrl: draft.baseUrl,
     apiKeyEnvName: draft.apiKeyEnvName,
+    apiKeyValue: draft.apiKeyValue.trim(),
     containerImage: draft.containerImage,
     commandTemplate: draft.commandTemplate,
     systemPrompt: draft.systemPrompt,
     enabled: draft.enabled,
-    environment: envPairsToRecord(draft.environment)
+    environment
   }
 }
 
@@ -2461,6 +2486,23 @@ function envPairsToRecord(rows: EnvPair[]): Record<string, string> {
       .map(row => [row.key.trim(), row.value.trim()] as const)
       .filter(([key]) => key)
   )
+}
+
+function readEnvValue(env: Record<string, string>, key: string) {
+  const normalizedKey = key.trim().toLowerCase()
+  if (!normalizedKey) return undefined
+  const match = Object.entries(env).find(([envKey]) => envKey.trim().toLowerCase() === normalizedKey)
+  return match?.[1]
+}
+
+function deleteEnvKey(env: Record<string, string>, key: string) {
+  const normalizedKey = key.trim().toLowerCase()
+  if (!normalizedKey) return
+  for (const envKey of Object.keys(env)) {
+    if (envKey.trim().toLowerCase() === normalizedKey) {
+      delete env[envKey]
+    }
+  }
 }
 
 function newEnvPair(): EnvPair {

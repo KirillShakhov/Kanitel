@@ -96,6 +96,7 @@ public sealed record RepositoryRequest(
 /// <param name="BaseUrl">Provider API base URL.</param>
 /// <param name="Model">Model name passed to the agent runtime.</param>
 /// <param name="ApiKeyEnvName">Host environment variable name containing the provider API key.</param>
+/// <param name="ApiKeyValue">Optional API key or token saved into ApiKeyEnvName for agents configured from the UI or API.</param>
 /// <param name="ContainerImage">Docker image used for isolated task workspaces.</param>
 /// <param name="CommandTemplate">Shell command run inside the agent container.</param>
 /// <param name="SystemPrompt">System prompt prepended to the Kanitel task prompt.</param>
@@ -110,6 +111,7 @@ public sealed record AgentRequest(
     string? BaseUrl,
     string? Model,
     string? ApiKeyEnvName,
+    string? ApiKeyValue,
     string? ContainerImage,
     string? CommandTemplate,
     string? SystemPrompt,
