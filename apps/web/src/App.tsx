@@ -1222,6 +1222,11 @@ function TaskModal({
   onCommentDraftChange: (value: string) => void
   onAddComment: () => void
 }) {
+  const authorComment = comments.reduce<TaskComment | null>((oldest, comment) => {
+    if (!oldest) return comment
+    return comment.createdAt.localeCompare(oldest.createdAt) < 0 ? comment : oldest
+  }, null)
+
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <section className="task-modal" onMouseDown={event => event.stopPropagation()}>
@@ -1245,53 +1250,7 @@ function TaskModal({
               {t.description}
               <textarea value={draft.description} onChange={event => onDraftChange({ ...draft, description: event.target.value })} rows={6} />
             </label>
-            <div className="form-grid two">
-              <label>
-                {t.status}
-                <select value={draft.columnId} onChange={event => onDraftChange({ ...draft, columnId: event.target.value })}>
-                  {columns.map(column => (
-                    <option key={column.id} value={column.id}>{column.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                {t.priority}
-                <select value={draft.priority} onChange={event => onDraftChange({ ...draft, priority: event.target.value })}>
-                  <option value="low">{t.priorities.low}</option>
-                  <option value="normal">{t.priorities.normal}</option>
-                  <option value="high">{t.priorities.high}</option>
-                  <option value="urgent">{t.priorities.urgent}</option>
-                </select>
-              </label>
-            </div>
-            <div className="form-grid two">
-              <label>
-                {t.assignee}
-                <select value={draft.assigneeId} onChange={event => onDraftChange({ ...draft, assigneeId: event.target.value })}>
-                  <option value="">{t.noAssignee}</option>
-                  {participants.map(participant => (
-                    <option key={participant.key} value={participant.key}>{participant.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                {t.taskRole}
-                <select value={draft.assignmentRole} onChange={event => onDraftChange({ ...draft, assignmentRole: event.target.value })}>
-                  <option value="worker">worker</option>
-                  <option value="reviewer">reviewer</option>
-                  <option value="manager">manager</option>
-                  <option value="observer">observer</option>
-                </select>
-              </label>
-            </div>
-            <button className="primary-button" onClick={onSave} disabled={busy}>
-              <Save size={16} />
-              {t.saveTask}
-            </button>
-          </div>
-
-          <aside className="conversation-panel">
-            <section className="comments">
+            <section className="comments task-comments">
               <h3><MessageSquare size={16} />{t.comments}</h3>
               {comments.map(comment => (
                 <article className={`comment ${comment.authorType}`} key={comment.id}>
@@ -1310,6 +1269,38 @@ function TaskModal({
                 </button>
               </div>
             </section>
+          </div>
+
+          <aside className="task-side-panel">
+            <label>
+              {t.status}
+              <select value={draft.columnId} onChange={event => onDraftChange({ ...draft, columnId: event.target.value })}>
+                {columns.map(column => (
+                  <option key={column.id} value={column.id}>{column.name}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              {t.assignee}
+              <select value={draft.assigneeId} onChange={event => onDraftChange({ ...draft, assigneeId: event.target.value })}>
+                <option value="">{t.noAssignee}</option>
+                {participants.map(participant => (
+                  <option key={participant.key} value={participant.key}>{participant.name}</option>
+                ))}
+              </select>
+            </label>
+            <div className="task-author">
+              <span>{t.author}</span>
+              {authorComment ? (
+                <AuthorBadge comment={authorComment} agents={agents} people={people} labels={t} />
+              ) : (
+                <strong>{t.system}</strong>
+              )}
+            </div>
+            <button className="primary-button" onClick={onSave} disabled={busy}>
+              <Save size={16} />
+              {t.saveTask}
+            </button>
             <section className="runs-panel">
               <h3><CheckCircle2 size={16} />{t.runs}</h3>
               {runs.length === 0 && <p className="muted">{t.noRuns}</p>}
@@ -1350,7 +1341,6 @@ function ProjectsPage({
   onDeleteColumn,
   onParticipantDraftChange,
   onAddParticipant,
-  onUpdateParticipantRole,
   onRemoveParticipant,
   onRepoDraftChange,
   onAddRepository,
@@ -1378,7 +1368,6 @@ function ProjectsPage({
   onDeleteColumn: (columnId: string) => void
   onParticipantDraftChange: (draft: ParticipantDraft) => void
   onAddParticipant: () => void
-  onUpdateParticipantRole: (participant: Participant, role: string) => void
   onRemoveParticipant: (participant: Participant) => void
   onRepoDraftChange: (draft: { name: string; url: string; branch: string; authMode: string }) => void
   onAddRepository: () => void
@@ -1458,11 +1447,6 @@ function ProjectsPage({
                       <strong>{participant.name}</strong>
                       <em>{participant.kind === 'agent' ? t.agent : participant.email || t.person}</em>
                     </span>
-                    <select value={participant.role} onChange={event => onUpdateParticipantRole(participant, event.target.value)}>
-                      {roleOptions.map(role => (
-                        <option key={role} value={role}>{role}</option>
-                      ))}
-                    </select>
                     <button className="icon-button compact" title={t.remove} onClick={() => onRemoveParticipant(participant)}>
                       <Trash2 size={15} />
                     </button>
@@ -1507,14 +1491,6 @@ function ProjectsPage({
                       </select>
                     </label>
                   )}
-                  <label>
-                    {t.participantRole}
-                    <select value={participantDraft.role} onChange={event => onParticipantDraftChange({ ...participantDraft, role: event.target.value })}>
-                      {roleOptions.map(role => (
-                        <option key={role} value={role}>{role}</option>
-                      ))}
-                    </select>
-                  </label>
                   <button className="secondary-button" onClick={onAddParticipant} disabled={busy}>
                     <UserPlus size={16} />
                     {t.addParticipant}
@@ -1902,7 +1878,6 @@ function TaskMeta({ labels: t, task, participants, runs }: { labels: Labels; tas
   return (
     <span className="task-meta">
       <span>{participant?.kind === 'agent' ? <Bot size={13} /> : <Users size={13} />} {participant?.name ?? t.noAssignee}</span>
-      <span>{task.assignmentRole}</span>
       <span>{run?.status ?? t.noRuns}</span>
     </span>
   )
@@ -1938,8 +1913,7 @@ function buildParticipants(state: KanitelState, projectId: string): Participant[
       linkId: member.id,
       name: person.displayName,
       email: person.email,
-      avatarUrl: person.avatarUrl,
-      role: member.role
+      avatarUrl: person.avatarUrl
     })
   }
 
@@ -1952,8 +1926,7 @@ function buildParticipants(state: KanitelState, projectId: string): Participant[
       id: agent.id,
       linkId: link.id,
       name: agent.name,
-      avatarUrl: agent.avatarUrl,
-      role: link.role
+      avatarUrl: agent.avatarUrl
     })
   }
 
@@ -2087,14 +2060,6 @@ function newEnvId() {
   return `env_${Math.random().toString(36).slice(2, 10)}`
 }
 
-function priorityLabel(priority: string, t: Labels) {
-  if (priority === 'low' || priority === 'normal' || priority === 'high' || priority === 'urgent') {
-    return t.priorities[priority]
-  }
-
-  return priority
-}
-
 function formatDate(value: string, locale: Locale) {
   return new Intl.DateTimeFormat(locale === 'ru' ? 'ru-RU' : 'en-US', {
     day: '2-digit',
@@ -2115,5 +2080,3 @@ function readLocale(): Locale {
   if (stored === 'ru' || stored === 'en') return stored
   return window.navigator.language.toLowerCase().startsWith('ru') ? 'ru' : 'en'
 }
-
-const roleOptions = ['viewer', 'editor', 'worker', 'reviewer', 'manager', 'owner']

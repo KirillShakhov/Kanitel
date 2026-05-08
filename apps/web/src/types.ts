@@ -41,7 +41,6 @@ export type ProjectMember = {
   id: string
   projectId: string
   personId: string
-  role: string
   addedAt: string
 }
 
@@ -78,7 +77,6 @@ export type ProjectAgent = {
   id: string
   projectId: string
   agentId: string
-  role: string
   addedAt: string
 }
 
@@ -90,8 +88,6 @@ export type TaskCard = {
   description: string
   assigneeAgentId?: string | null
   assigneePersonId?: string | null
-  assignmentRole: string
-  priority: string
   position: number
   createdAt: string
   updatedAt: string

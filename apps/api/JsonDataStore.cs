@@ -120,14 +120,6 @@ public sealed class JsonDataStore
             agent.AvatarUrl ??= "";
         }
 
-        foreach (var task in state.Tasks)
-        {
-            if (string.IsNullOrWhiteSpace(task.AssignmentRole))
-            {
-                task.AssignmentRole = "worker";
-            }
-        }
-
         foreach (var person in state.People)
         {
             person.AvatarUrl ??= "";
@@ -172,8 +164,6 @@ public sealed class JsonDataStore
             ColumnId = columns[1].Id,
             Title = "Create your first agent",
             Description = "Add an agent in Settings, attach it to this project as a participant, then assign a task to it.",
-            AssignmentRole = "worker",
-            Priority = "normal",
             Position = 0
         };
 
@@ -184,7 +174,7 @@ public sealed class JsonDataStore
             People = [owner],
             Members =
             [
-                new ProjectMember { ProjectId = project.Id, PersonId = owner.Id, Role = "owner" }
+                new ProjectMember { ProjectId = project.Id, PersonId = owner.Id }
             ],
             Agents = [],
             ProjectAgents = [],

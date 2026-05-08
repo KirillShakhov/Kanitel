@@ -60,7 +60,6 @@ public sealed class ProjectMember
     public string Id { get; set; } = Ids.New("member");
     public string ProjectId { get; set; } = "";
     public string PersonId { get; set; } = "";
-    public string Role { get; set; } = "viewer";
     public DateTimeOffset AddedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
@@ -100,7 +99,6 @@ public sealed class ProjectAgent
     public string Id { get; set; } = Ids.New("project_agent");
     public string ProjectId { get; set; } = "";
     public string AgentId { get; set; } = "";
-    public string Role { get; set; } = "worker";
     public DateTimeOffset AddedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
@@ -113,8 +111,6 @@ public sealed class TaskCard
     public string Description { get; set; } = "";
     public string? AssigneeAgentId { get; set; }
     public string? AssigneePersonId { get; set; }
-    public string AssignmentRole { get; set; } = "worker";
-    public string Priority { get; set; } = "normal";
     public int Position { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;

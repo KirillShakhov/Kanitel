@@ -90,13 +90,11 @@ app.MapGet("/api/openapi.json", () => Results.Ok(new
         new { method = "PATCH", path = "/api/auth/me", purpose = "Update the current user profile; password changes require the current password and matching confirmation." },
         new { method = "POST", path = "/api/projects", purpose = "Create a project with default columns." },
         new { method = "POST", path = "/api/projects/{projectId}/tasks", purpose = "Create a task card." },
-        new { method = "PATCH", path = "/api/tasks/{taskId}", purpose = "Update a task card, assignment, role, priority, or column." },
+        new { method = "PATCH", path = "/api/tasks/{taskId}", purpose = "Update a task card, assignment, or column." },
         new { method = "POST", path = "/api/tasks/{taskId}/comments", purpose = "Add a human/system comment." },
         new { method = "POST", path = "/api/agent/tasks/{taskId}/comments", purpose = "Add a comment as a project-linked agent." },
-        new { method = "PATCH", path = "/api/agent/tasks/{taskId}", purpose = "Agent action endpoint: move status, comment, assign/unassign, or set assignment role." },
+        new { method = "PATCH", path = "/api/agent/tasks/{taskId}", purpose = "Agent action endpoint: move status, comment, assign, or unassign." },
         new { method = "DELETE", path = "/api/agents/{agentId}", purpose = "Delete a global agent and clear project/task links." },
-        new { method = "PATCH", path = "/api/project-agents/{projectAgentId}", purpose = "Change an agent role on a project, for example worker/reviewer/manager." },
-        new { method = "PATCH", path = "/api/agent/project-agents/{projectAgentId}", purpose = "Agent action endpoint: change or remove a project-agent role." },
         new { method = "POST", path = "/api/scheduler/tick", purpose = "Force one scheduler scan." }
     }
 }))
@@ -198,8 +196,7 @@ app.MapPost("/api/auth/register", async (JsonDataStore store, AuthRegisterReques
                 state.Members.Add(new ProjectMember
                 {
                     ProjectId = projectId,
-                    PersonId = person.Id,
-                    Role = "owner"
+                    PersonId = person.Id
                 });
             }
         }
@@ -599,15 +596,13 @@ app.MapPost("/api/projects/{projectId}/members", async (JsonDataStore store, str
 
         if (existing is not null)
         {
-            existing.Role = string.IsNullOrWhiteSpace(request.Role) ? existing.Role : request.Role.Trim();
             return new { person, member = existing };
         }
 
         var member = new ProjectMember
         {
             ProjectId = projectId,
-            PersonId = person.Id,
-            Role = string.IsNullOrWhiteSpace(request.Role) ? "viewer" : request.Role.Trim()
+            PersonId = person.Id
         };
         state.Members.Add(member);
         return new { person, member };
@@ -616,32 +611,8 @@ app.MapPost("/api/projects/{projectId}/members", async (JsonDataStore store, str
     return result is null ? Results.BadRequest() : Results.Ok(result);
 })
     .WithTags("Participants")
-    .WithSummary("Add or update project person")
-    .WithDescription("Adds a person to a project by existing person id or by email/display name. If the person is already a member, this updates the project role.");
-
-app.MapPatch("/api/members/{memberId}", async (JsonDataStore store, string memberId, MemberRequest request, CancellationToken cancellationToken) =>
-{
-    var updated = await store.MutateAsync(state =>
-    {
-        var member = state.Members.FirstOrDefault(m => m.Id == memberId);
-        if (member is null)
-        {
-            return null;
-        }
-
-        if (!string.IsNullOrWhiteSpace(request.Role))
-        {
-            member.Role = request.Role.Trim();
-        }
-
-        return member;
-    }, cancellationToken);
-
-    return updated is null ? Results.NotFound() : Results.Ok(updated);
-})
-    .WithTags("Participants")
-    .WithSummary("Update project person role")
-    .WithDescription("Updates the role of a human participant in a project. Common roles are viewer, editor, worker, reviewer, manager, and owner.");
+    .WithSummary("Add project person")
+    .WithDescription("Adds a person to a project by existing person id or by email/display name. If the person is already a member, the existing participant link is returned.");
 
 app.MapDelete("/api/members/{memberId}", async (JsonDataStore store, string memberId, CancellationToken cancellationToken) =>
 {
@@ -859,15 +830,13 @@ app.MapPost("/api/projects/{projectId}/agents", async (JsonDataStore store, stri
         var existing = state.ProjectAgents.FirstOrDefault(pa => pa.ProjectId == projectId && pa.AgentId == request.AgentId);
         if (existing is not null)
         {
-            existing.Role = string.IsNullOrWhiteSpace(request.Role) ? existing.Role : request.Role.Trim();
             return existing;
         }
 
         var projectAgent = new ProjectAgent
         {
             ProjectId = projectId,
-            AgentId = request.AgentId.Trim(),
-            Role = string.IsNullOrWhiteSpace(request.Role) ? "worker" : request.Role.Trim()
+            AgentId = request.AgentId.Trim()
         };
         state.ProjectAgents.Add(projectAgent);
         return projectAgent;
@@ -876,32 +845,8 @@ app.MapPost("/api/projects/{projectId}/agents", async (JsonDataStore store, stri
     return linked is null ? Results.BadRequest() : Results.Ok(linked);
 })
     .WithTags("Participants")
-    .WithSummary("Add or update project agent")
-    .WithDescription("Adds a global agent to a project as a participant. If already linked, updates the agent's project role. Project agents can be assigned tasks like people.");
-
-app.MapPatch("/api/project-agents/{projectAgentId}", async (JsonDataStore store, string projectAgentId, ProjectAgentPatchRequest request, CancellationToken cancellationToken) =>
-{
-    var updated = await store.MutateAsync(state =>
-    {
-        var projectAgent = state.ProjectAgents.FirstOrDefault(pa => pa.Id == projectAgentId);
-        if (projectAgent is null)
-        {
-            return null;
-        }
-
-        if (!string.IsNullOrWhiteSpace(request.Role))
-        {
-            projectAgent.Role = request.Role.Trim();
-        }
-
-        return projectAgent;
-    }, cancellationToken);
-
-    return updated is null ? Results.NotFound() : Results.Ok(updated);
-})
-    .WithTags("Participants")
-    .WithSummary("Update project agent role")
-    .WithDescription("Updates the role of an agent participant in a project. Agents can use separate action endpoints to change or remove roles when allowed.");
+    .WithSummary("Add project agent")
+    .WithDescription("Adds a global agent to a project as a participant. Project agents can be assigned tasks like people.");
 
 app.MapDelete("/api/project-agents/{projectAgentId}", async (JsonDataStore store, string projectAgentId, CancellationToken cancellationToken) =>
 {
@@ -948,8 +893,6 @@ app.MapPost("/api/projects/{projectId}/tasks", async (JsonDataStore store, strin
             Description = request.Description?.Trim() ?? "",
             AssigneeAgentId = BlankToNull(request.AssigneeAgentId),
             AssigneePersonId = BlankToNull(request.AssigneePersonId),
-            AssignmentRole = string.IsNullOrWhiteSpace(request.AssignmentRole) ? "worker" : request.AssignmentRole.Trim(),
-            Priority = string.IsNullOrWhiteSpace(request.Priority) ? "normal" : request.Priority.Trim(),
             Position = state.Tasks.Where(t => t.ProjectId == projectId && t.ColumnId == columnId).Select(t => t.Position).DefaultIfEmpty(-1).Max() + 1
         };
         state.Tasks.Add(task);
@@ -990,8 +933,6 @@ app.MapPatch("/api/tasks/{taskId}", async (JsonDataStore store, string taskId, T
         }
         if (request.AssigneeAgentId is not null) task.AssigneeAgentId = BlankToNull(request.AssigneeAgentId);
         if (request.AssigneePersonId is not null) task.AssigneePersonId = BlankToNull(request.AssigneePersonId);
-        if (request.AssignmentRole is not null) task.AssignmentRole = string.IsNullOrWhiteSpace(request.AssignmentRole) ? "worker" : request.AssignmentRole.Trim();
-        if (!string.IsNullOrWhiteSpace(request.Priority)) task.Priority = request.Priority.Trim();
         if (request.Position.HasValue)
         {
             task.Position = Math.Max(0, request.Position.Value);
@@ -1019,7 +960,7 @@ app.MapPatch("/api/tasks/{taskId}", async (JsonDataStore store, string taskId, T
 })
     .WithTags("Tasks")
     .WithSummary("Update task")
-    .WithDescription("Updates title, description, status column, assignee, assignment role, priority, or position. Drag-and-drop uses this endpoint by changing `columnId` and `position`.");
+    .WithDescription("Updates title, description, status column, assignee, or position. Drag-and-drop uses this endpoint by changing `columnId` and `position`.");
 
 app.MapPost("/api/tasks/{taskId}/comments", async (JsonDataStore store, string taskId, CommentRequest request, CancellationToken cancellationToken) =>
 {
@@ -1111,7 +1052,6 @@ app.MapPatch("/api/agent/tasks/{taskId}", async (JsonDataStore store, string tas
         if (request.UnassignAgent == true)
         {
             task.AssigneeAgentId = null;
-            task.AssignmentRole = "worker";
         }
         else if (request.AssigneeAgentId is not null)
         {
@@ -1121,18 +1061,6 @@ app.MapPatch("/api/agent/tasks/{taskId}", async (JsonDataStore store, string tas
             {
                 task.AssigneeAgentId = assigneeAgentId;
             }
-        }
-
-        if (request.AssignmentRole is not null)
-        {
-            task.AssignmentRole = string.IsNullOrWhiteSpace(request.AssignmentRole)
-                ? "worker"
-                : request.AssignmentRole.Trim();
-        }
-
-        if (!string.IsNullOrWhiteSpace(request.Priority))
-        {
-            task.Priority = request.Priority.Trim();
         }
 
         if (!string.IsNullOrWhiteSpace(request.Title))
@@ -1166,39 +1094,7 @@ app.MapPatch("/api/agent/tasks/{taskId}", async (JsonDataStore store, string tas
 })
     .WithTags("Agent Actions")
     .WithSummary("Agent task action")
-    .WithDescription("Allows a linked agent to update a task: move it by column id or column name, add a comment body, reassign to another allowed agent, unassign itself, update assignment role, priority, title, or description.");
-
-app.MapPatch("/api/agent/project-agents/{projectAgentId}", async (JsonDataStore store, string projectAgentId, AgentProjectAgentActionRequest request, CancellationToken cancellationToken) =>
-{
-    var result = await store.MutateAsync<object?>(state =>
-    {
-        var projectAgent = state.ProjectAgents.FirstOrDefault(pa => pa.Id == projectAgentId);
-        if (projectAgent is null ||
-            string.IsNullOrWhiteSpace(request.AgentId) ||
-            !CanAgentActOnProject(state, projectAgent.ProjectId, request.AgentId))
-        {
-            return null;
-        }
-
-        if (request.Remove == true)
-        {
-            state.ProjectAgents.Remove(projectAgent);
-            return new { removed = true, projectAgentId };
-        }
-
-        if (!string.IsNullOrWhiteSpace(request.Role))
-        {
-            projectAgent.Role = request.Role.Trim();
-        }
-
-        return new { removed = false, projectAgent };
-    }, cancellationToken);
-
-    return result is null ? Results.BadRequest(new { error = "Agent cannot update this project role." }) : Results.Ok(result);
-})
-    .WithTags("Agent Actions")
-    .WithSummary("Agent project role action")
-    .WithDescription("Allows a linked agent to update or remove an agent participant role in the same project. This supports AI manager workflows where an agent promotes another agent to manager or removes an assignment.");
+    .WithDescription("Allows a linked agent to update a task: move it by column id or column name, add a comment body, reassign to another allowed agent, unassign itself, title, or description.");
 
 var indexPath = Path.Combine(app.Environment.WebRootPath ?? "", "index.html");
 if (File.Exists(indexPath))
@@ -1414,13 +1310,11 @@ public sealed record PersonRequest(string DisplayName, string? Email, string? Av
 /// <param name="DisplayName">Name for a new person when PersonId is omitted.</param>
 /// <param name="Email">Email used to find or create a person.</param>
 /// <param name="AvatarUrl">Optional avatar URL for the person profile.</param>
-/// <param name="Role">Project role such as viewer, editor, worker, reviewer, manager, or owner.</param>
 public sealed record MemberRequest(
     string? PersonId,
     string? DisplayName,
     string? Email,
-    string? AvatarUrl,
-    string? Role);
+    string? AvatarUrl);
 
 /// <summary>Git repository link payload.</summary>
 /// <param name="Name">Display name. Defaults to the URL when omitted.</param>
@@ -1464,12 +1358,7 @@ public sealed record AgentRequest(
 
 /// <summary>Add an existing global agent to a project.</summary>
 /// <param name="AgentId">Global agent id.</param>
-/// <param name="Role">Project role for this agent, such as worker, reviewer, manager, or observer.</param>
-public sealed record ProjectAgentRequest(string AgentId, string? Role);
-
-/// <summary>Project agent role update payload.</summary>
-/// <param name="Role">New project role for the agent participant.</param>
-public sealed record ProjectAgentPatchRequest(string? Role);
+public sealed record ProjectAgentRequest(string AgentId);
 
 /// <summary>Task create/update payload.</summary>
 /// <param name="Title">Task title. Required when creating.</param>
@@ -1477,8 +1366,6 @@ public sealed record ProjectAgentPatchRequest(string? Role);
 /// <param name="ColumnId">Board column id. Used as task status.</param>
 /// <param name="AssigneeAgentId">Agent assignee id. Mutually exclusive with AssigneePersonId in normal UI use.</param>
 /// <param name="AssigneePersonId">Human assignee id. Mutually exclusive with AssigneeAgentId in normal UI use.</param>
-/// <param name="AssignmentRole">Role for the assignee on this task, such as worker, reviewer, or manager.</param>
-/// <param name="Priority">Task priority: low, normal, high, or urgent.</param>
 /// <param name="Position">Zero-based order inside the column. Used by drag-and-drop.</param>
 /// <param name="InitialComment">Initial conversation message written when creating a task.</param>
 /// <param name="AuthorType">Initial comment author type: person, agent, or system.</param>
@@ -1489,8 +1376,6 @@ public sealed record TaskRequest(
     string? ColumnId,
     string? AssigneeAgentId,
     string? AssigneePersonId,
-    string? AssignmentRole,
-    string? Priority,
     int? Position,
     string? InitialComment,
     string? AuthorType,
@@ -1518,9 +1403,7 @@ public sealed record AgentCommentRequest(
 /// <param name="ColumnId">Target board column id.</param>
 /// <param name="ColumnName">Target board column name when the agent does not know the id.</param>
 /// <param name="AssigneeAgentId">Agent id to assign next. Empty string clears the agent assignment.</param>
-/// <param name="AssignmentRole">New task role, for example manager or reviewer.</param>
-/// <param name="UnassignAgent">When true, clears the current agent assignment and resets role to worker.</param>
-/// <param name="Priority">New priority.</param>
+/// <param name="UnassignAgent">When true, clears the current agent assignment.</param>
 /// <param name="Title">Optional new title.</param>
 /// <param name="Description">Optional new description.</param>
 public sealed record AgentTaskActionRequest(
@@ -1529,17 +1412,6 @@ public sealed record AgentTaskActionRequest(
     string? ColumnId,
     string? ColumnName,
     string? AssigneeAgentId,
-    string? AssignmentRole,
     bool? UnassignAgent,
-    string? Priority,
     string? Title,
     string? Description);
-
-/// <summary>Agent action for another project-agent role.</summary>
-/// <param name="AgentId">Acting agent id. Must be enabled and linked to the same project.</param>
-/// <param name="Role">New role to assign to the project-agent link.</param>
-/// <param name="Remove">When true, removes the project-agent link instead of updating the role.</param>
-public sealed record AgentProjectAgentActionRequest(
-    string AgentId,
-    string? Role,
-    bool? Remove);

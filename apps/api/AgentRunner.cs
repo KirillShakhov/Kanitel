@@ -328,8 +328,6 @@ public sealed class DockerAgentRunner(
         prompt.AppendLine($"Task title: {task.Title}");
         prompt.AppendLine($"Task id: {task.Id}");
         prompt.AppendLine($"Status: {(statusColumn is null ? task.ColumnId : $"{statusColumn.Name} ({statusColumn.Id})")}");
-        prompt.AppendLine($"Priority: {task.Priority}");
-        prompt.AppendLine($"Assignment role: {task.AssignmentRole}");
         prompt.AppendLine($"Assigned agent id: {task.AssigneeAgentId ?? "none"}");
         prompt.AppendLine($"Assigned person id: {task.AssigneePersonId ?? "none"}");
         prompt.AppendLine($"Author: {(firstComment is null ? "unknown" : AuthorLabel(firstComment, people, agents))}");
@@ -374,7 +372,7 @@ public sealed class DockerAgentRunner(
         prompt.AppendLine("curl -s -X POST \"$KANITEL_API_URL/api/agent/tasks/$KANITEL_TASK_ID/comments\" -H 'Content-Type: application/json' -d '{\"agentId\":\"'\"$KANITEL_AGENT_ID\"'\",\"body\":\"your note\"}'");
         prompt.AppendLine("Move/change the task:");
         prompt.AppendLine("curl -s -X PATCH \"$KANITEL_API_URL/api/agent/tasks/$KANITEL_TASK_ID\" -H 'Content-Type: application/json' -d '{\"agentId\":\"'\"$KANITEL_AGENT_ID\"'\",\"columnName\":\"Review\",\"body\":\"Moved to review.\"}'");
-        prompt.AppendLine("Assign a manager or unassign an agent by PATCHing the same endpoint with assigneeAgentId, assignmentRole=\"manager\", or unassignAgent=true.");
+        prompt.AppendLine("Assign or unassign an agent by PATCHing the same endpoint with assigneeAgentId or unassignAgent=true.");
         prompt.AppendLine();
         prompt.AppendLine("## Expected outcome");
         prompt.AppendLine("Work inside /workspace. If you change repositories, leave clear notes in your final response. Keep the response concise; Kanitel will attach it as an agent comment.");

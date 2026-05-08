@@ -505,31 +505,6 @@ textarea:focus {
   overflow-wrap: anywhere;
 }
 
-.priority {
-  width: fit-content;
-  border-radius: 999px;
-  padding: 3px 8px;
-  background: var(--surface-strong);
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 850;
-}
-
-.priority.high {
-  background: rgba(235, 167, 79, 0.2);
-  color: var(--warning);
-}
-
-.priority.urgent {
-  background: rgba(217, 148, 155, 0.24);
-  color: var(--danger);
-}
-
-.priority.low {
-  background: var(--sage-soft);
-  color: var(--success);
-}
-
 .task-meta {
   display: flex;
   align-items: center;
@@ -629,13 +604,32 @@ label {
 }
 
 .task-edit,
-.conversation-panel {
+.task-side-panel {
   min-width: 0;
 }
 
-.conversation-panel {
+.task-side-panel {
   display: grid;
   gap: 14px;
+  align-content: start;
+  border-left: 1px solid var(--border);
+  padding-left: 16px;
+}
+
+.task-author {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.task-author > strong {
+  color: var(--text);
+}
+
+.task-comments {
+  margin-top: 14px;
 }
 
 .comments h3,
@@ -801,7 +795,7 @@ label {
 }
 
 .participant-row {
-  grid-template-columns: auto minmax(0, 1fr) minmax(120px, 150px) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
 .participant-row span {
@@ -1026,6 +1020,13 @@ label {
 
   .header-actions {
     justify-content: flex-start;
+  }
+
+  .task-side-panel {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    padding-left: 0;
+    padding-top: 14px;
   }
 }
 
