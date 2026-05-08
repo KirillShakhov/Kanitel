@@ -54,9 +54,16 @@ public sealed class DockerAgentRunner(
         await CloneRepositoriesAsync(repositories, workspace, log, cancellationToken);
 
         var prompt = BuildPrompt(project, agent, task, comments, people, agents, columns, repositories);
+        var conversationCommentCount = comments.Count(comment =>
+            !string.Equals(comment.AuthorType, "system", StringComparison.OrdinalIgnoreCase));
+        var maxConversationComments = ReadInt("KANITEL_AGENT_PROMPT_MAX_COMMENTS", 100);
+        var skippedConversationComments = Math.Max(0, conversationCommentCount - maxConversationComments);
         var promptPath = Path.Combine(workspace, "task.md");
         await File.WriteAllTextAsync(promptPath, prompt, cancellationToken);
         log.AppendLine($"Task prompt: {prompt.Length:n0} characters.");
+        log.AppendLine(
+            $"Task context: {conversationCommentCount - skippedConversationComments:n0} conversation comment(s) included, " +
+            $"{skippedConversationComments:n0} older omitted, {comments.Count - conversationCommentCount:n0} system omitted.");
 
         if (IsMockRunner())
         {
@@ -589,9 +596,10 @@ public sealed class DockerAgentRunner(
             .Where(comment => !string.Equals(comment.AuthorType, "system", StringComparison.OrdinalIgnoreCase))
             .OrderBy(comment => comment.CreatedAt)
             .ToList();
-        var maxConversationComments = ReadInt("KANITEL_AGENT_PROMPT_MAX_COMMENTS", 25);
+        var maxConversationComments = ReadInt("KANITEL_AGENT_PROMPT_MAX_COMMENTS", 100);
         var skippedComments = Math.Max(0, conversationComments.Count - maxConversationComments);
         var recentConversation = conversationComments.Skip(skippedComments).ToList();
+        var latestConversationComment = conversationComments.LastOrDefault();
 
         var prompt = new StringBuilder();
         prompt.AppendLine(TruncateForPrompt(agent.SystemPrompt, ReadInt("KANITEL_AGENT_PROMPT_SYSTEM_MAX_CHARS", 12_000)));
@@ -631,7 +639,17 @@ public sealed class DockerAgentRunner(
         }
 
         prompt.AppendLine();
+        prompt.AppendLine("## Action rules");
+        prompt.AppendLine("- Read the conversation as the task dialogue from oldest to newest. Person comments are user messages; agent comments are previous AI replies.");
+        prompt.AppendLine("- The latest non-system comment is the trigger for this run. Do not restart from the title or ignore earlier confirmations.");
+        prompt.AppendLine("- If the latest person comment explicitly confirms, approves, asks you to close, or asks you to move the task, perform that action through the Kanitel API instead of asking for confirmation again.");
+        prompt.AppendLine("- When the task is complete or the user says to close it, move it to the Done column if one exists, add a final comment, and set unassignAgent=true.");
+        prompt.AppendLine("- If the task is ready for human review but not complete, move it to Review if that column exists and leave a concise comment.");
+        prompt.AppendLine("- Ask a follow-up question only when required information is genuinely missing.");
+
+        prompt.AppendLine();
         prompt.AppendLine("## Conversation");
+        prompt.AppendLine("Oldest message first; newest message last.");
         if (comments.Count != conversationComments.Count)
         {
             prompt.AppendLine($"- {comments.Count - conversationComments.Count} system status/log comment(s) omitted from agent context.");
@@ -652,12 +670,26 @@ public sealed class DockerAgentRunner(
             prompt.AppendLine();
         }
 
+        prompt.AppendLine("## Current trigger");
+        if (latestConversationComment is null)
+        {
+            prompt.AppendLine("No non-system comments are available.");
+        }
+        else
+        {
+            prompt.AppendLine($"[{latestConversationComment.CreatedAt:u}] {AuthorLabel(latestConversationComment, people, agents)}");
+            prompt.AppendLine(TruncateForPrompt(latestConversationComment.Body, maxCommentChars));
+        }
+
+        prompt.AppendLine();
         prompt.AppendLine("## Kanitel API access");
         prompt.AppendLine("You may update the board directly from this container. Use the environment variables KANITEL_API_URL, KANITEL_TASK_ID, KANITEL_AGENT_ID, and KANITEL_PROJECT_ID.");
         prompt.AppendLine("Comment as yourself:");
         prompt.AppendLine("curl -s -X POST \"$KANITEL_API_URL/api/agent/tasks/$KANITEL_TASK_ID/comments\" -H 'Content-Type: application/json' -d '{\"agentId\":\"'\"$KANITEL_AGENT_ID\"'\",\"body\":\"your note\"}'");
         prompt.AppendLine("Move/change the task:");
         prompt.AppendLine("curl -s -X PATCH \"$KANITEL_API_URL/api/agent/tasks/$KANITEL_TASK_ID\" -H 'Content-Type: application/json' -d '{\"agentId\":\"'\"$KANITEL_AGENT_ID\"'\",\"columnName\":\"Review\",\"body\":\"Moved to review.\"}'");
+        prompt.AppendLine("Complete and unassign yourself:");
+        prompt.AppendLine("curl -s -X PATCH \"$KANITEL_API_URL/api/agent/tasks/$KANITEL_TASK_ID\" -H 'Content-Type: application/json' -d '{\"agentId\":\"'\"$KANITEL_AGENT_ID\"'\",\"columnName\":\"Done\",\"unassignAgent\":true,\"body\":\"Done.\"}'");
         prompt.AppendLine("Assign or unassign an agent by PATCHing the same endpoint with assigneeAgentId or unassignAgent=true.");
         prompt.AppendLine();
         prompt.AppendLine("## Expected outcome");
