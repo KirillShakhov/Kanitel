@@ -56,8 +56,6 @@ type TaskDraft = {
   description: string
   columnId: string
   assigneeId: string
-  assignmentRole: string
-  priority: string
   initialComment: string
 }
 
@@ -65,6 +63,7 @@ type AuthDraft = {
   displayName: string
   email: string
   password: string
+  confirmPassword: string
   avatarUrl: string
 }
 
@@ -72,7 +71,9 @@ type ProfileDraft = {
   displayName: string
   email: string
   avatarUrl: string
-  password: string
+  currentPassword: string
+  newPassword: string
+  confirmNewPassword: string
 }
 
 type ParticipantDraft = {
@@ -82,7 +83,6 @@ type ParticipantDraft = {
   displayName: string
   email: string
   avatarUrl: string
-  role: string
 }
 
 type AgentDraft = {
@@ -108,7 +108,6 @@ type Participant = {
   name: string
   email?: string
   avatarUrl?: string | null
-  role: string
 }
 
 const labels = {
@@ -123,6 +122,12 @@ const labels = {
     displayName: 'Имя',
     email: 'Email',
     password: 'Пароль',
+    confirmPassword: 'Повторите пароль',
+    currentPassword: 'Текущий пароль',
+    newPassword: 'Новый пароль',
+    confirmNewPassword: 'Повторите новый пароль',
+    passwordsDoNotMatch: 'Пароли не совпадают',
+    passwordChangeFieldsRequired: 'Для смены пароля заполните текущий пароль, новый пароль и повтор нового пароля',
     avatarUrl: 'Аватар URL',
     navBoard: 'Доска',
     navProjects: 'Проекты',
@@ -154,12 +159,10 @@ const labels = {
     agent: 'Агент',
     selectPerson: 'Выбрать человека',
     selectAgent: 'Выбрать агента',
-    role: 'Роль',
     remove: 'Убрать',
     existingPerson: 'Существующий человек',
     newPersonName: 'Имя нового человека',
     newPersonEmail: 'Email нового человека',
-    participantRole: 'Роль в проекте',
     deleteAgent: 'Удалить агента',
     envKey: 'Переменная',
     envValue: 'Значение',
@@ -173,14 +176,13 @@ const labels = {
     deleteRepository: 'Удалить репозиторий',
     addTask: 'Добавить задачу',
     title: 'Заголовок',
-    priority: 'Приоритет',
     assignee: 'Исполнитель',
     noAssignee: 'Без исполнителя',
-    taskRole: 'Роль в задаче',
     noDescription: 'Без описания',
     noTasks: 'Пока пусто',
     taskDetails: 'Задача',
     status: 'Статус',
+    author: 'Автор',
     saveTask: 'Сохранить задачу',
     comments: 'Комментарии',
     commentPlaceholder: 'Комментарий',
@@ -207,13 +209,7 @@ const labels = {
     theme: 'Тема',
     language: 'Язык',
     noRuns: 'запусков нет',
-    system: 'система',
-    priorities: {
-      low: 'Низкий',
-      normal: 'Обычный',
-      high: 'Высокий',
-      urgent: 'Срочный'
-    }
+    system: 'система'
   },
   en: {
     loading: 'Loading Kanitel',
@@ -226,6 +222,12 @@ const labels = {
     displayName: 'Name',
     email: 'Email',
     password: 'Password',
+    confirmPassword: 'Repeat password',
+    currentPassword: 'Current password',
+    newPassword: 'New password',
+    confirmNewPassword: 'Repeat new password',
+    passwordsDoNotMatch: 'Passwords do not match',
+    passwordChangeFieldsRequired: 'To change the password, fill current password, new password, and repeat new password',
     avatarUrl: 'Avatar URL',
     navBoard: 'Board',
     navProjects: 'Projects',
@@ -257,12 +259,10 @@ const labels = {
     agent: 'Agent',
     selectPerson: 'Select person',
     selectAgent: 'Select agent',
-    role: 'Role',
     remove: 'Remove',
     existingPerson: 'Existing person',
     newPersonName: 'New person name',
     newPersonEmail: 'New person email',
-    participantRole: 'Project role',
     deleteAgent: 'Delete agent',
     envKey: 'Variable',
     envValue: 'Value',
@@ -276,14 +276,13 @@ const labels = {
     deleteRepository: 'Delete repository',
     addTask: 'Add task',
     title: 'Title',
-    priority: 'Priority',
     assignee: 'Assignee',
     noAssignee: 'Unassigned',
-    taskRole: 'Task role',
     noDescription: 'No description',
     noTasks: 'Nothing here yet',
     taskDetails: 'Task',
     status: 'Status',
+    author: 'Author',
     saveTask: 'Save task',
     comments: 'Comments',
     commentPlaceholder: 'Comment',
@@ -310,13 +309,7 @@ const labels = {
     theme: 'Theme',
     language: 'Language',
     noRuns: 'no runs',
-    system: 'system',
-    priorities: {
-      low: 'Low',
-      normal: 'Normal',
-      high: 'High',
-      urgent: 'Urgent'
-    }
+    system: 'system'
   }
 } as const
 
@@ -327,8 +320,6 @@ const emptyTaskDraft: TaskDraft = {
   description: '',
   columnId: '',
   assigneeId: '',
-  assignmentRole: 'worker',
-  priority: 'normal',
   initialComment: ''
 }
 
@@ -336,6 +327,7 @@ const emptyAuthDraft: AuthDraft = {
   displayName: '',
   email: '',
   password: '',
+  confirmPassword: '',
   avatarUrl: ''
 }
 
@@ -346,7 +338,6 @@ const emptyParticipantDraft: ParticipantDraft = {
   displayName: '',
   email: '',
   avatarUrl: '',
-  role: 'editor'
 }
 
 export default function App() {
@@ -394,7 +385,9 @@ export default function App() {
         displayName: draft.displayName || payload.currentUser?.displayName || '',
         email: draft.email || payload.currentUser?.email || '',
         avatarUrl: draft.avatarUrl || payload.currentUser?.avatarUrl || '',
-        password: ''
+        currentPassword: '',
+        newPassword: '',
+        confirmNewPassword: ''
       }))
     }
     setError('')
@@ -477,8 +470,6 @@ export default function App() {
       description: selectedTask.description,
       columnId: selectedTask.columnId,
       assigneeId: assigneeValue(selectedTask),
-      assignmentRole: selectedTask.assignmentRole || 'worker',
-      priority: selectedTask.priority,
       initialComment: ''
     })
   }, [selectedTask])
@@ -528,6 +519,11 @@ export default function App() {
     setBusy(true)
     setError('')
     try {
+      if (authMode === 'register' && authDraft.password !== authDraft.confirmPassword) {
+        setError(t.passwordsDoNotMatch)
+        return
+      }
+
       const path = authMode === 'login' ? '/api/auth/login' : '/api/auth/register'
       const payload = authMode === 'login'
         ? { email: authDraft.email, password: authDraft.password }
@@ -553,6 +549,22 @@ export default function App() {
   }
 
   async function updateProfile() {
+    const wantsPasswordChange = Boolean(
+      profileDraft.currentPassword ||
+      profileDraft.newPassword ||
+      profileDraft.confirmNewPassword
+    )
+
+    if (wantsPasswordChange) {
+      if (!profileDraft.currentPassword || !profileDraft.newPassword || !profileDraft.confirmNewPassword) {
+        throw new Error(t.passwordChangeFieldsRequired)
+      }
+
+      if (profileDraft.newPassword !== profileDraft.confirmNewPassword) {
+        throw new Error(t.passwordsDoNotMatch)
+      }
+    }
+
     const result = await postProfile(profileDraft)
     setCurrentUser(result.person)
     setProfileDraft(toProfileDraft(result.person))
@@ -593,9 +605,7 @@ export default function App() {
       description: taskDraft.description,
       columnId: taskDraft.columnId,
       assigneeAgentId: assignment.assigneeAgentId,
-      assigneePersonId: assignment.assigneePersonId,
-      assignmentRole: taskDraft.assignmentRole,
-      priority: taskDraft.priority
+      assigneePersonId: assignment.assigneePersonId
     }))
   }
 
@@ -620,8 +630,7 @@ export default function App() {
     if (participantDraft.kind === 'agent') {
       if (!participantDraft.agentId) return
       await mutate(postJson(`/api/projects/${activeProject.id}/agents`, {
-        agentId: participantDraft.agentId,
-        role: participantDraft.role || 'worker'
+        agentId: participantDraft.agentId
       }))
       setParticipantDraft(emptyParticipantDraft)
       return
@@ -632,19 +641,9 @@ export default function App() {
       personId: participantDraft.personId,
       displayName: participantDraft.displayName,
       email: participantDraft.email,
-      avatarUrl: participantDraft.avatarUrl,
-      role: participantDraft.role || 'editor'
+      avatarUrl: participantDraft.avatarUrl
     }))
     setParticipantDraft(emptyParticipantDraft)
-  }
-
-  async function updateParticipantRole(participant: Participant, role: string) {
-    if (participant.kind === 'agent') {
-      await mutate(patchJson(`/api/project-agents/${participant.linkId}`, { role }))
-      return
-    }
-
-    await mutate(patchJson(`/api/members/${participant.linkId}`, { role }))
   }
 
   async function removeParticipant(participant: Participant) {
@@ -852,7 +851,6 @@ export default function App() {
           onDeleteColumn={(columnId) => mutate(deleteJson(`/api/columns/${columnId}`))}
           onParticipantDraftChange={setParticipantDraft}
           onAddParticipant={addParticipant}
-          onUpdateParticipantRole={updateParticipantRole}
           onRemoveParticipant={removeParticipant}
           onRepoDraftChange={setRepoDraft}
           onAddRepository={() => {
@@ -989,6 +987,12 @@ function AuthScreen({
             {t.password}
             <input type="password" value={draft.password} onChange={event => onDraftChange({ ...draft, password: event.target.value })} />
           </label>
+          {mode === 'register' && (
+            <label>
+              {t.confirmPassword}
+              <input type="password" value={draft.confirmPassword} onChange={event => onDraftChange({ ...draft, confirmPassword: event.target.value })} />
+            </label>
+          )}
           {error && <div className="error-line compact-error">{error}</div>}
           <button className="primary-button full" onClick={onSubmit} disabled={busy}>
             <LogIn size={16} />
@@ -1143,20 +1147,12 @@ function KanbanColumn({
         <div className="inline-form">
           <input value={taskDraft.title} onChange={event => onDraftChange({ ...taskDraft, title: event.target.value })} placeholder={t.title} />
           <textarea value={taskDraft.description} onChange={event => onDraftChange({ ...taskDraft, description: event.target.value })} placeholder={t.description} rows={3} />
-          <div className="form-grid two">
-            <select value={taskDraft.assigneeId} onChange={event => onDraftChange({ ...taskDraft, assigneeId: event.target.value })}>
-              <option value="">{t.noAssignee}</option>
-              {participants.map(participant => (
-                <option key={participant.key} value={participant.key}>{participant.name}</option>
-              ))}
-            </select>
-            <select value={taskDraft.priority} onChange={event => onDraftChange({ ...taskDraft, priority: event.target.value })}>
-              <option value="low">{t.priorities.low}</option>
-              <option value="normal">{t.priorities.normal}</option>
-              <option value="high">{t.priorities.high}</option>
-              <option value="urgent">{t.priorities.urgent}</option>
-            </select>
-          </div>
+          <select value={taskDraft.assigneeId} onChange={event => onDraftChange({ ...taskDraft, assigneeId: event.target.value })}>
+            <option value="">{t.noAssignee}</option>
+            {participants.map(participant => (
+              <option key={participant.key} value={participant.key}>{participant.name}</option>
+            ))}
+          </select>
           <button className="primary-button" onClick={onCreateTask} disabled={busy}>
             <Plus size={16} />
             {t.create}
@@ -1178,7 +1174,6 @@ function KanbanColumn({
             onDragEnd={() => onDragStart('')}
             onClick={() => onOpenTask(task.id)}
           >
-            <span className={`priority ${task.priority}`}>{priorityLabel(task.priority, t)}</span>
             <strong>{task.title}</strong>
             <span className="task-description">{task.description || t.noDescription}</span>
             <TaskMeta labels={t} task={task} participants={participants} runs={runs} />
@@ -1631,9 +1626,19 @@ function SettingsPage({
             {t.avatarUrl}
             <input value={profileDraft.avatarUrl} onChange={event => onProfileDraftChange({ ...profileDraft, avatarUrl: event.target.value })} />
           </label>
+          <div className="form-grid two">
+            <label>
+              {t.currentPassword}
+              <input type="password" value={profileDraft.currentPassword} onChange={event => onProfileDraftChange({ ...profileDraft, currentPassword: event.target.value })} />
+            </label>
+            <label>
+              {t.newPassword}
+              <input type="password" value={profileDraft.newPassword} onChange={event => onProfileDraftChange({ ...profileDraft, newPassword: event.target.value })} />
+            </label>
+          </div>
           <label>
-            {t.password}
-            <input type="password" value={profileDraft.password} onChange={event => onProfileDraftChange({ ...profileDraft, password: event.target.value })} />
+            {t.confirmNewPassword}
+            <input type="password" value={profileDraft.confirmNewPassword} onChange={event => onProfileDraftChange({ ...profileDraft, confirmNewPassword: event.target.value })} />
           </label>
           <button className="primary-button" onClick={onSaveProfile} disabled={busy}>
             <Save size={16} />
@@ -2030,12 +2035,21 @@ async function postProfile(profileDraft: ProfileDraft) {
     displayName: profileDraft.displayName,
     email: profileDraft.email,
     avatarUrl: profileDraft.avatarUrl,
-    password: profileDraft.password
+    currentPassword: profileDraft.currentPassword,
+    newPassword: profileDraft.newPassword,
+    confirmNewPassword: profileDraft.confirmNewPassword
   })
 }
 
 function emptyProfileDraft(): ProfileDraft {
-  return { displayName: '', email: '', avatarUrl: '', password: '' }
+  return {
+    displayName: '',
+    email: '',
+    avatarUrl: '',
+    currentPassword: '',
+    newPassword: '',
+    confirmNewPassword: ''
+  }
 }
 
 function toProfileDraft(person: Person): ProfileDraft {
@@ -2043,7 +2057,9 @@ function toProfileDraft(person: Person): ProfileDraft {
     displayName: person.displayName,
     email: person.email,
     avatarUrl: person.avatarUrl,
-    password: ''
+    currentPassword: '',
+    newPassword: '',
+    confirmNewPassword: ''
   }
 }
 

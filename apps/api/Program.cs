@@ -84,10 +84,10 @@ app.MapGet("/api/openapi.json", () => Results.Ok(new
     endpoints = new object[]
     {
         new { method = "GET", path = "/api/bootstrap", purpose = "Load state, provider presets, agent templates, and scheduler info." },
-        new { method = "POST", path = "/api/auth/register", purpose = "Register a local user and return an API token." },
+        new { method = "POST", path = "/api/auth/register", purpose = "Register a local user with matching password confirmation and return an API token." },
         new { method = "POST", path = "/api/auth/login", purpose = "Login and return an API token." },
         new { method = "GET", path = "/api/auth/me", purpose = "Read the current user profile from the bearer token." },
-        new { method = "PATCH", path = "/api/auth/me", purpose = "Update the current user profile." },
+        new { method = "PATCH", path = "/api/auth/me", purpose = "Update the current user profile; password changes require the current password and matching confirmation." },
         new { method = "POST", path = "/api/projects", purpose = "Create a project with default columns." },
         new { method = "POST", path = "/api/projects/{projectId}/tasks", purpose = "Create a task card." },
         new { method = "PATCH", path = "/api/tasks/{taskId}", purpose = "Update a task card, assignment, role, priority, or column." },
@@ -130,9 +130,15 @@ app.MapPost("/api/auth/register", async (JsonDataStore store, AuthRegisterReques
 {
     if (string.IsNullOrWhiteSpace(request.DisplayName) ||
         string.IsNullOrWhiteSpace(request.Email) ||
-        string.IsNullOrWhiteSpace(request.Password))
+        string.IsNullOrWhiteSpace(request.Password) ||
+        string.IsNullOrWhiteSpace(request.ConfirmPassword))
     {
-        return Results.BadRequest(new { error = "Display name, email, and password are required." });
+        return Results.BadRequest(new { error = "Display name, email, password, and password confirmation are required." });
+    }
+
+    if (request.Password != request.ConfirmPassword)
+    {
+        return Results.BadRequest(new { error = "Passwords do not match." });
     }
 
     if (request.Password.Length < 6)
@@ -205,7 +211,7 @@ app.MapPost("/api/auth/register", async (JsonDataStore store, AuthRegisterReques
 })
     .WithTags("Auth")
     .WithSummary("Register a local user")
-    .WithDescription("Creates a local account, creates or updates the matching person profile, returns an auth token, and grants the first registered account owner access to the seed project.");
+    .WithDescription("Creates a local account when password and confirmation match, creates or updates the matching person profile, returns an auth token, and grants the first registered account owner access to the seed project.");
 
 app.MapPost("/api/auth/login", async (JsonDataStore store, AuthLoginRequest request, CancellationToken cancellationToken) =>
 {
@@ -254,33 +260,66 @@ app.MapPatch("/api/auth/me", async (JsonDataStore store, HttpRequest httpRequest
         return Results.Unauthorized();
     }
 
-    var result = await store.MutateAsync<object?>(state =>
+    var wantsPasswordChange =
+        !string.IsNullOrWhiteSpace(request.CurrentPassword) ||
+        !string.IsNullOrWhiteSpace(request.NewPassword) ||
+        !string.IsNullOrWhiteSpace(request.ConfirmNewPassword);
+
+    if (wantsPasswordChange)
+    {
+        if (string.IsNullOrWhiteSpace(request.CurrentPassword) ||
+            string.IsNullOrWhiteSpace(request.NewPassword) ||
+            string.IsNullOrWhiteSpace(request.ConfirmNewPassword))
+        {
+            return Results.BadRequest(new { error = "Current password, new password, and password confirmation are required." });
+        }
+
+        if (request.NewPassword != request.ConfirmNewPassword)
+        {
+            return Results.BadRequest(new { error = "Passwords do not match." });
+        }
+
+        if (request.NewPassword.Length < 6)
+        {
+            return Results.BadRequest(new { error = "Password must be at least 6 characters." });
+        }
+    }
+
+    var result = await store.MutateAsync<ProfileUpdateResult>(state =>
     {
         var account = state.Accounts.FirstOrDefault(item => item.SessionToken == token);
         if (account is null)
         {
-            return null;
+            return ProfileUpdateResult.Fail("Profile could not be updated.");
         }
 
         var person = state.People.FirstOrDefault(item => item.Id == account.PersonId);
         if (person is null)
         {
-            return null;
+            return ProfileUpdateResult.Fail("Profile could not be updated.");
         }
 
+        var nextEmail = string.IsNullOrWhiteSpace(request.Email) ? null : NormalizeEmail(request.Email);
         if (!string.IsNullOrWhiteSpace(request.Email))
         {
-            var email = NormalizeEmail(request.Email);
             var occupied = state.Accounts.Any(item =>
                 item.Id != account.Id &&
-                string.Equals(item.Email, email, StringComparison.OrdinalIgnoreCase));
+                string.Equals(item.Email, nextEmail, StringComparison.OrdinalIgnoreCase));
             if (occupied)
             {
-                return null;
+                return ProfileUpdateResult.Fail("Email is already used by another account.");
             }
+        }
 
-            person.Email = email;
-            account.Email = email;
+        if (wantsPasswordChange && !VerifyPassword(request.CurrentPassword!, account.PasswordSalt, account.PasswordHash))
+        {
+            return ProfileUpdateResult.Fail("Current password is incorrect.");
+        }
+
+        if (nextEmail is not null)
+        {
+            person.Email = nextEmail;
+            account.Email = nextEmail;
         }
 
         if (!string.IsNullOrWhiteSpace(request.DisplayName))
@@ -293,26 +332,23 @@ app.MapPatch("/api/auth/me", async (JsonDataStore store, HttpRequest httpRequest
             person.AvatarUrl = request.AvatarUrl.Trim();
         }
 
-        if (!string.IsNullOrWhiteSpace(request.Password))
+        if (wantsPasswordChange)
         {
-            if (request.Password.Length < 6)
-            {
-                return null;
-            }
-
             var salt = NewToken();
             account.PasswordSalt = salt;
-            account.PasswordHash = HashPassword(request.Password, salt);
+            account.PasswordHash = HashPassword(request.NewPassword!, salt);
         }
 
-        return new AuthResponse(account.SessionToken, person);
+        return ProfileUpdateResult.Success(new AuthResponse(account.SessionToken, person));
     }, cancellationToken);
 
-    return result is null ? Results.BadRequest(new { error = "Profile could not be updated." }) : Results.Ok(result);
+    return result.Response is null
+        ? Results.BadRequest(new { error = result.Error ?? "Profile could not be updated." })
+        : Results.Ok(result.Response);
 })
     .WithTags("Auth")
     .WithSummary("Update current profile")
-    .WithDescription("Updates the authenticated user's display name, email, avatar URL, or password. Password updates require at least six characters; blank password leaves it unchanged.");
+    .WithDescription("Updates the authenticated user's display name, email, avatar URL, or password. Password changes require the current password and matching new password confirmation.");
 
 app.MapPost("/api/scheduler/tick", async (AgentScheduler scheduler, CancellationToken cancellationToken) =>
 {
@@ -1314,11 +1350,13 @@ public sealed record ProjectRequest(string Name, string? Description);
 /// <param name="DisplayName">Name displayed in comments, task authors, and project participants.</param>
 /// <param name="Email">Unique login email. Stored normalized to lowercase.</param>
 /// <param name="Password">Plain password for registration. Must be at least six characters.</param>
+/// <param name="ConfirmPassword">Password confirmation. Must match Password.</param>
 /// <param name="AvatarUrl">Optional avatar image URL for the linked person profile.</param>
 public sealed record AuthRegisterRequest(
     string DisplayName,
     string Email,
     string Password,
+    string ConfirmPassword,
     string? AvatarUrl);
 
 /// <summary>Login payload for local token authentication.</summary>
@@ -1330,12 +1368,22 @@ public sealed record AuthLoginRequest(string Email, string Password);
 /// <param name="DisplayName">New display name. Blank values are ignored.</param>
 /// <param name="Email">New unique email. Blank values are ignored.</param>
 /// <param name="AvatarUrl">New avatar URL. Empty string clears the avatar.</param>
-/// <param name="Password">New password. Blank values leave the password unchanged.</param>
+/// <param name="CurrentPassword">Current account password. Required when changing the password.</param>
+/// <param name="NewPassword">New password. Must be at least six characters when provided.</param>
+/// <param name="ConfirmNewPassword">New password confirmation. Must match NewPassword.</param>
 public sealed record ProfileRequest(
     string? DisplayName,
     string? Email,
     string? AvatarUrl,
-    string? Password);
+    string? CurrentPassword,
+    string? NewPassword,
+    string? ConfirmNewPassword);
+
+file sealed record ProfileUpdateResult(AuthResponse? Response, string? Error)
+{
+    public static ProfileUpdateResult Success(AuthResponse response) => new(response, null);
+    public static ProfileUpdateResult Fail(string error) => new(null, error);
+}
 
 /// <summary>Authentication response containing the bearer token and person profile.</summary>
 /// <param name="Token">Opaque session token. Send it as Authorization: Bearer token.</param>
