@@ -113,6 +113,7 @@ public sealed class JsonDataStore
         state.ProjectAgents ??= [];
         state.Tasks ??= [];
         state.Comments ??= [];
+        state.History ??= [];
         state.Runs ??= [];
 
         foreach (var agent in state.Agents)
@@ -182,6 +183,18 @@ public sealed class JsonDataStore
             Agents = EnvAgentCatalog.Read(configuration),
             ProjectAgents = [],
             Tasks = [firstTask],
+            History =
+            [
+                new TaskHistoryEntry
+                {
+                    TaskId = firstTask.Id,
+                    AuthorType = "person",
+                    AuthorId = owner.Id,
+                    Action = "created",
+                    Field = "task",
+                    To = firstTask.Title
+                }
+            ],
             Comments =
             [
                 new TaskComment

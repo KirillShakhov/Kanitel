@@ -10,6 +10,7 @@ export type KanitelState = {
   projectAgents: ProjectAgent[]
   tasks: TaskCard[]
   comments: TaskComment[]
+  history: TaskHistoryEntry[]
   runs: AgentRun[]
 }
 
@@ -99,6 +100,18 @@ export type TaskComment = {
   authorType: string
   authorId: string
   body: string
+  createdAt: string
+}
+
+export type TaskHistoryEntry = {
+  id: string
+  taskId: string
+  authorType: string
+  authorId: string
+  action: string
+  field: string
+  from: string
+  to: string
   createdAt: string
 }
 

@@ -6,7 +6,7 @@ public static class TaskEndpoints
 {
     public static IEndpointRouteBuilder MapTaskEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapPost("/api/projects/{projectId}/tasks", async (JsonDataStore store, string projectId, TaskRequest request, CancellationToken cancellationToken) =>
+        app.MapPost("/api/projects/{projectId}/tasks", async (JsonDataStore store, string projectId, TaskRequest request, HttpRequest httpRequest, CancellationToken cancellationToken) =>
         {
             var created = await store.MutateAsync<object?>(state =>
             {
@@ -33,15 +33,25 @@ public static class TaskEndpoints
                     AssigneePersonId = BlankToNull(request.AssigneePersonId),
                     Position = state.Tasks.Where(t => t.ProjectId == projectId && t.ColumnId == columnId).Select(t => t.Position).DefaultIfEmpty(-1).Max() + 1
                 };
+                var actor = ResolveActor(state, httpRequest, request.AuthorType, request.AuthorId, "person", "owner");
                 state.Tasks.Add(task);
                 state.Comments.Add(new TaskComment
                 {
                     TaskId = task.Id,
-                    AuthorType = string.IsNullOrWhiteSpace(request.AuthorType) ? "person" : request.AuthorType.Trim(),
-                    AuthorId = BlankToNull(request.AuthorId) ?? "owner",
+                    AuthorType = actor.Type,
+                    AuthorId = actor.Id,
                     Body = string.IsNullOrWhiteSpace(request.InitialComment)
                         ? "Task created."
                         : request.InitialComment.Trim()
+                });
+                state.History.Add(new TaskHistoryEntry
+                {
+                    TaskId = task.Id,
+                    AuthorType = actor.Type,
+                    AuthorId = actor.Id,
+                    Action = "created",
+                    Field = "task",
+                    To = task.Title
                 });
                 return task;
             }, cancellationToken);
@@ -52,7 +62,7 @@ public static class TaskEndpoints
             .WithSummary("Create task")
             .WithDescription("Creates a task card in a project column, assigns it to either a person or an agent, and writes the initial conversation comment. Agent assignment can trigger the scheduler after a non-agent comment.");
 
-        app.MapPatch("/api/tasks/{taskId}", async (JsonDataStore store, string taskId, TaskRequest request, CancellationToken cancellationToken) =>
+        app.MapPatch("/api/tasks/{taskId}", async (JsonDataStore store, string taskId, TaskRequest request, HttpRequest httpRequest, CancellationToken cancellationToken) =>
         {
             var updated = await store.MutateAsync(state =>
             {
@@ -62,7 +72,12 @@ public static class TaskEndpoints
                     return null;
                 }
 
+                var actor = ResolveActor(state, httpRequest, request.AuthorType, request.AuthorId, "system", "system");
                 var previousColumnId = task.ColumnId;
+                var previousTitle = task.Title;
+                var previousDescription = task.Description;
+                var previousStatus = DescribeColumn(state, task.ColumnId);
+                var previousAssignee = DescribeAssignee(state, task.AssigneePersonId, task.AssigneeAgentId);
                 if (!string.IsNullOrWhiteSpace(request.Title)) task.Title = request.Title.Trim();
                 if (request.Description is not null) task.Description = request.Description.Trim();
                 if (!string.IsNullOrWhiteSpace(request.ColumnId) && state.Columns.Any(c => c.Id == request.ColumnId && c.ProjectId == task.ProjectId))
@@ -90,6 +105,10 @@ public static class TaskEndpoints
                     NormalizeTaskPositions(state, task.ProjectId, task.ColumnId);
                 }
 
+                AddChange(state, task, actor, "title", previousTitle, task.Title);
+                AddChange(state, task, actor, "description", previousDescription, task.Description);
+                AddChange(state, task, actor, "status", previousStatus, DescribeColumn(state, task.ColumnId));
+                AddChange(state, task, actor, "assignee", previousAssignee, DescribeAssignee(state, task.AssigneePersonId, task.AssigneeAgentId));
                 task.UpdatedAt = DateTimeOffset.UtcNow;
                 return task;
             }, cancellationToken);
@@ -171,6 +190,13 @@ public static class TaskEndpoints
                     return null;
                 }
 
+                var actor = new HistoryActor("agent", request.AgentId.Trim());
+                var previousColumnId = task.ColumnId;
+                var previousTitle = task.Title;
+                var previousDescription = task.Description;
+                var previousStatus = DescribeColumn(state, task.ColumnId);
+                var previousAssignee = DescribeAssignee(state, task.AssigneePersonId, task.AssigneeAgentId);
+
                 if (!string.IsNullOrWhiteSpace(request.ColumnId) &&
                     state.Columns.Any(c => c.Id == request.ColumnId && c.ProjectId == task.ProjectId))
                 {
@@ -211,6 +237,22 @@ public static class TaskEndpoints
                     task.Description = request.Description.Trim();
                 }
 
+                if (previousColumnId != task.ColumnId)
+                {
+                    task.Position = state.Tasks
+                        .Where(t => t.ProjectId == task.ProjectId && t.ColumnId == task.ColumnId && t.Id != task.Id)
+                        .Select(t => t.Position)
+                        .DefaultIfEmpty(-1)
+                        .Max() + 1;
+                    NormalizeTaskPositions(state, task.ProjectId, previousColumnId);
+                    NormalizeTaskPositions(state, task.ProjectId, task.ColumnId);
+                }
+
+                AddChange(state, task, actor, "title", previousTitle, task.Title);
+                AddChange(state, task, actor, "description", previousDescription, task.Description);
+                AddChange(state, task, actor, "status", previousStatus, DescribeColumn(state, task.ColumnId));
+                AddChange(state, task, actor, "assignee", previousAssignee, DescribeAssignee(state, task.AssigneePersonId, task.AssigneeAgentId));
+
                 TaskComment? comment = null;
                 if (!string.IsNullOrWhiteSpace(request.Body))
                 {
@@ -235,5 +277,73 @@ public static class TaskEndpoints
             .WithDescription("Allows a linked agent to update a task: move it by column id or column name, add a comment body, reassign to another allowed agent, unassign itself, title, or description.");
 
         return app;
+    }
+
+    private sealed record HistoryActor(string Type, string Id);
+
+    private static HistoryActor ResolveActor(
+        KanitelState state,
+        HttpRequest request,
+        string? requestedType,
+        string? requestedId,
+        string fallbackType,
+        string fallbackId)
+    {
+        var currentUser = FindCurrentUser(state, request);
+        if (currentUser is not null)
+        {
+            return new HistoryActor("person", currentUser.Id);
+        }
+
+        return new HistoryActor(
+            BlankToNull(requestedType) ?? fallbackType,
+            BlankToNull(requestedId) ?? fallbackId);
+    }
+
+    private static void AddChange(
+        KanitelState state,
+        TaskCard task,
+        HistoryActor actor,
+        string field,
+        string? from,
+        string? to)
+    {
+        var previous = from?.Trim() ?? "";
+        var next = to?.Trim() ?? "";
+        if (string.Equals(previous, next, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        state.History.Add(new TaskHistoryEntry
+        {
+            TaskId = task.Id,
+            AuthorType = actor.Type,
+            AuthorId = actor.Id,
+            Action = "changed",
+            Field = field,
+            From = previous,
+            To = next
+        });
+    }
+
+    private static string DescribeColumn(KanitelState state, string columnId)
+    {
+        return state.Columns.FirstOrDefault(column => column.Id == columnId)?.Name ?? columnId;
+    }
+
+    private static string DescribeAssignee(KanitelState state, string? personId, string? agentId)
+    {
+        if (!string.IsNullOrWhiteSpace(agentId))
+        {
+            return state.Agents.FirstOrDefault(agent => agent.Id == agentId)?.Name ?? agentId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(personId))
+        {
+            return state.People.FirstOrDefault(person => person.Id == personId)?.DisplayName ?? personId;
+        }
+
+        return "";
     }
 }

@@ -4,6 +4,7 @@ import {
   Folder,
   GitBranch,
   GripVertical,
+  History as HistoryIcon,
   Languages,
   LayoutDashboard,
   Loader2,
@@ -35,7 +36,8 @@ import type {
   ProjectAgent,
   ProviderPreset,
   TaskCard,
-  TaskComment
+  TaskComment,
+  TaskHistoryEntry
 } from './types'
 
 type Tab = 'board' | 'projects' | 'settings'
@@ -173,8 +175,16 @@ const labels = {
     taskDetails: 'Задача',
     status: 'Статус',
     author: 'Автор',
-    saveTask: 'Сохранить задачу',
     comments: 'Комментарии',
+    history: 'История',
+    noHistory: 'Истории пока нет',
+    createdTask: 'создал задачу',
+    changed: 'изменил',
+    emptyValue: 'пусто',
+    fieldTitle: 'заголовок',
+    fieldDescription: 'описание',
+    fieldStatus: 'статус',
+    fieldAssignee: 'исполнителя',
     commentPlaceholder: 'Комментарий',
     send: 'Отправить',
     runs: 'Запуски',
@@ -268,8 +278,16 @@ const labels = {
     taskDetails: 'Task',
     status: 'Status',
     author: 'Author',
-    saveTask: 'Save task',
     comments: 'Comments',
+    history: 'History',
+    noHistory: 'No history yet',
+    createdTask: 'created task',
+    changed: 'changed',
+    emptyValue: 'empty',
+    fieldTitle: 'title',
+    fieldDescription: 'description',
+    fieldStatus: 'status',
+    fieldAssignee: 'assignee',
     commentPlaceholder: 'Comment',
     send: 'Send',
     runs: 'Runs',
@@ -454,7 +472,51 @@ export default function App() {
       assigneeId: assigneeValue(selectedTask),
       initialComment: ''
     })
-  }, [selectedTask])
+    setCommentDraft('')
+  }, [selectedTaskId])
+
+  useEffect(() => {
+    if (!selectedTask || !taskDraft.title.trim()) return
+
+    const draftMatchesTask =
+      taskDraft.title === selectedTask.title &&
+      taskDraft.description === selectedTask.description &&
+      taskDraft.columnId === selectedTask.columnId &&
+      taskDraft.assigneeId === assigneeValue(selectedTask)
+
+    if (draftMatchesTask) return
+
+    const timer = window.setTimeout(async () => {
+      const assignment = splitAssignee(taskDraft.assigneeId)
+      try {
+        setError('')
+        await patchJson<TaskCard>(`/api/tasks/${selectedTask.id}`, {
+          title: taskDraft.title,
+          description: taskDraft.description,
+          columnId: taskDraft.columnId,
+          assigneeAgentId: assignment.assigneeAgentId,
+          assigneePersonId: assignment.assigneePersonId
+        })
+        await refresh()
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+      }
+    }, 700)
+
+    return () => window.clearTimeout(timer)
+  }, [
+    selectedTask?.id,
+    selectedTask?.title,
+    selectedTask?.description,
+    selectedTask?.columnId,
+    selectedTask?.assigneeAgentId,
+    selectedTask?.assigneePersonId,
+    taskDraft.title,
+    taskDraft.description,
+    taskDraft.columnId,
+    taskDraft.assigneeId,
+    refresh
+  ])
 
   useEffect(() => {
     if (!selectedAgent) return
@@ -579,18 +641,6 @@ export default function App() {
     setNewTaskColumnId('')
   }
 
-  async function saveTask() {
-    if (!selectedTask) return
-    const assignment = splitAssignee(taskDraft.assigneeId)
-    await mutate(patchJson<TaskCard>(`/api/tasks/${selectedTask.id}`, {
-      title: taskDraft.title,
-      description: taskDraft.description,
-      columnId: taskDraft.columnId,
-      assigneeAgentId: assignment.assigneeAgentId,
-      assigneePersonId: assignment.assigneePersonId
-    }))
-  }
-
   async function moveTask(taskId: string, columnId: string) {
     if (!activeProject) return
     const targetPosition = tasks.filter(task => task.columnId === columnId && task.id !== taskId).length
@@ -702,6 +752,9 @@ export default function App() {
 
   const selectedTaskComments = state.comments
     .filter(comment => comment.taskId === selectedTask?.id)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const selectedTaskHistory = (state.history ?? [])
+    .filter(entry => entry.taskId === selectedTask?.id)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   const selectedTaskRuns = state.runs
     .filter(run => run.taskId === selectedTask?.id)
@@ -874,6 +927,7 @@ export default function App() {
           columns={columns}
           participants={participants}
           comments={selectedTaskComments}
+          history={selectedTaskHistory}
           runs={selectedTaskRuns}
           agents={state.agents}
           people={state.people}
@@ -881,7 +935,6 @@ export default function App() {
           commentDraft={commentDraft}
           onClose={() => setSelectedTaskId('')}
           onDraftChange={setTaskDraft}
-          onSave={saveTask}
           onCommentDraftChange={setCommentDraft}
           onAddComment={addComment}
         />
@@ -1165,6 +1218,7 @@ function TaskModal({
   columns,
   participants,
   comments,
+  history,
   runs,
   agents,
   people,
@@ -1172,7 +1226,6 @@ function TaskModal({
   commentDraft,
   onClose,
   onDraftChange,
-  onSave,
   onCommentDraftChange,
   onAddComment
 }: {
@@ -1183,6 +1236,7 @@ function TaskModal({
   columns: BoardColumn[]
   participants: Participant[]
   comments: TaskComment[]
+  history: TaskHistoryEntry[]
   runs: Array<{ id: string; status: string; createdAt: string; finishedAt?: string | null; log: string }>
   agents: AgentProfile[]
   people: Person[]
@@ -1190,10 +1244,10 @@ function TaskModal({
   commentDraft: string
   onClose: () => void
   onDraftChange: (draft: TaskDraft) => void
-  onSave: () => void
   onCommentDraftChange: (value: string) => void
   onAddComment: () => void
 }) {
+  const [activityTab, setActivityTab] = useState<'comments' | 'history'>('comments')
   const authorComment = comments.reduce<TaskComment | null>((oldest, comment) => {
     if (!oldest) return comment
     return comment.createdAt.localeCompare(oldest.createdAt) < 0 ? comment : oldest
@@ -1223,23 +1277,50 @@ function TaskModal({
               <textarea value={draft.description} onChange={event => onDraftChange({ ...draft, description: event.target.value })} rows={6} />
             </label>
             <section className="comments task-comments">
-              <h3><MessageSquare size={16} />{t.comments}</h3>
-              <div className="comment-form">
-                <textarea value={commentDraft} onChange={event => onCommentDraftChange(event.target.value)} placeholder={t.commentPlaceholder} rows={3} />
-                <button className="secondary-button" onClick={onAddComment} disabled={busy}>
+              <div className="activity-tabs" role="tablist" aria-label={t.comments}>
+                <button className={activityTab === 'comments' ? 'active' : ''} onClick={() => setActivityTab('comments')} type="button">
                   <MessageSquare size={16} />
-                  {t.send}
+                  {t.comments}
+                </button>
+                <button className={activityTab === 'history' ? 'active' : ''} onClick={() => setActivityTab('history')} type="button">
+                  <HistoryIcon size={16} />
+                  {t.history}
                 </button>
               </div>
-              {comments.map(comment => (
-                <article className={`comment ${comment.authorType}`} key={comment.id}>
-                  <div>
-                    <AuthorBadge comment={comment} agents={agents} people={people} labels={t} />
-                    <time>{formatDate(comment.createdAt, locale)}</time>
+
+              {activityTab === 'comments' ? (
+                <>
+                  <div className="comment-form">
+                    <textarea value={commentDraft} onChange={event => onCommentDraftChange(event.target.value)} placeholder={t.commentPlaceholder} rows={3} />
+                    <button className="secondary-button" onClick={onAddComment} disabled={busy}>
+                      <MessageSquare size={16} />
+                      {t.send}
+                    </button>
                   </div>
-                  <p>{comment.body}</p>
-                </article>
-              ))}
+                  {comments.map(comment => (
+                    <article className={`comment ${comment.authorType}`} key={comment.id}>
+                      <div>
+                        <AuthorBadge comment={comment} agents={agents} people={people} labels={t} />
+                        <time>{formatDate(comment.createdAt, locale)}</time>
+                      </div>
+                      <p>{comment.body}</p>
+                    </article>
+                  ))}
+                </>
+              ) : (
+                <div className="history-list">
+                  {history.length === 0 && <p className="muted">{t.noHistory}</p>}
+                  {history.map(entry => (
+                    <article className="history-entry" key={entry.id}>
+                      <div>
+                        <ActorBadge authorType={entry.authorType} authorId={entry.authorId} agents={agents} people={people} labels={t} />
+                        <time>{formatDate(entry.createdAt, locale)}</time>
+                      </div>
+                      <HistoryEntryBody entry={entry} labels={t} />
+                    </article>
+                  ))}
+                </div>
+              )}
             </section>
           </div>
 
@@ -1269,10 +1350,6 @@ function TaskModal({
                 <strong>{t.system}</strong>
               )}
             </div>
-            <button className="primary-button" onClick={onSave} disabled={busy}>
-              <Save size={16} />
-              {t.saveTask}
-            </button>
             <section className="runs-panel">
               <h3><CheckCircle2 size={16} />{t.runs}</h3>
               {runs.length === 0 && <p className="muted">{t.noRuns}</p>}
@@ -1846,11 +1923,15 @@ function TaskMeta({ labels: t, task, participants, runs }: { labels: Labels; tas
 }
 
 function AuthorBadge({ comment, agents, people, labels: t }: { comment: TaskComment; agents: AgentProfile[]; people: Person[]; labels: Labels }) {
-  const agent = comment.authorType === 'agent'
-    ? agents.find(item => item.id === comment.authorId)
+  return <ActorBadge authorType={comment.authorType} authorId={comment.authorId} agents={agents} people={people} labels={t} />
+}
+
+function ActorBadge({ authorType, authorId, agents, people, labels: t }: { authorType: string; authorId: string; agents: AgentProfile[]; people: Person[]; labels: Labels }) {
+  const agent = authorType === 'agent'
+    ? agents.find(item => item.id === authorId)
     : undefined
-  const person = comment.authorType === 'person'
-    ? people.find(item => item.id === comment.authorId)
+  const person = authorType === 'person'
+    ? people.find(item => item.id === authorId)
     : undefined
   const authorName = agent?.name ?? person?.displayName ?? t.system
   const avatarUrl = agent?.avatarUrl ?? person?.avatarUrl
@@ -1860,6 +1941,42 @@ function AuthorBadge({ comment, agents, people, labels: t }: { comment: TaskComm
       <strong>{authorName}</strong>
     </span>
   )
+}
+
+function HistoryEntryBody({ entry, labels: t }: { entry: TaskHistoryEntry; labels: Labels }) {
+  if (entry.action === 'created') {
+    return <p>{t.createdTask}</p>
+  }
+
+  return (
+    <>
+      <p>{t.changed} {historyFieldLabel(entry.field, t)}</p>
+      <span className="history-change">
+        <span>{historyValue(entry.from, t)}</span>
+        <span>-&gt;</span>
+        <span>{historyValue(entry.to, t)}</span>
+      </span>
+    </>
+  )
+}
+
+function historyFieldLabel(field: string, t: Labels) {
+  switch (field) {
+    case 'title':
+      return t.fieldTitle
+    case 'description':
+      return t.fieldDescription
+    case 'status':
+      return t.fieldStatus
+    case 'assignee':
+      return t.fieldAssignee
+    default:
+      return field
+  }
+}
+
+function historyValue(value: string, t: Labels) {
+  return value.trim() || t.emptyValue
 }
 
 function buildParticipants(state: KanitelState, projectId: string): Participant[] {

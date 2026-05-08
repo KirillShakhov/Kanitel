@@ -639,6 +639,36 @@ label {
   margin-top: 14px;
 }
 
+.activity-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+}
+
+.activity-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  padding: 6px 10px;
+  font-weight: 800;
+}
+
+.activity-tabs button.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 8px rgba(76, 49, 35, 0.08);
+}
+
 .comments h3,
 .runs-panel h3 {
   display: flex;
@@ -674,6 +704,46 @@ label {
   margin: 6px 0 0;
   white-space: pre-wrap;
   line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.history-list {
+  display: grid;
+  gap: 10px;
+}
+
+.history-entry {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--bg-soft);
+}
+
+.history-entry > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.history-entry p {
+  margin: 8px 0 0;
+  font-weight: 800;
+}
+
+.history-change {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.history-change span {
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 

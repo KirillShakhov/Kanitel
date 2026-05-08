@@ -124,8 +124,8 @@ public sealed record ProjectAgentRequest(string AgentId);
 /// <param name="AssigneePersonId">Human assignee id. Mutually exclusive with AssigneeAgentId in normal UI use.</param>
 /// <param name="Position">Zero-based order inside the column. Used by drag-and-drop.</param>
 /// <param name="InitialComment">Initial conversation message written when creating a task.</param>
-/// <param name="AuthorType">Initial comment author type: person, agent, or system.</param>
-/// <param name="AuthorId">Initial comment author id.</param>
+/// <param name="AuthorType">Initial comment author type on create, or history actor fallback on update: person, agent, or system.</param>
+/// <param name="AuthorId">Initial comment author id on create, or history actor fallback on update.</param>
 public sealed record TaskRequest(
     string? Title,
     string? Description,

@@ -13,6 +13,7 @@ public sealed class KanitelState
     public List<ProjectAgent> ProjectAgents { get; set; } = [];
     public List<TaskCard> Tasks { get; set; } = [];
     public List<TaskComment> Comments { get; set; } = [];
+    public List<TaskHistoryEntry> History { get; set; } = [];
     public List<AgentRun> Runs { get; set; } = [];
 }
 
@@ -124,6 +125,19 @@ public sealed class TaskComment
     public string AuthorType { get; set; } = "person";
     public string AuthorId { get; set; } = "";
     public string Body { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class TaskHistoryEntry
+{
+    public string Id { get; set; } = Ids.New("history");
+    public string TaskId { get; set; } = "";
+    public string AuthorType { get; set; } = "system";
+    public string AuthorId { get; set; } = "";
+    public string Action { get; set; } = "changed";
+    public string Field { get; set; } = "";
+    public string From { get; set; } = "";
+    public string To { get; set; } = "";
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
