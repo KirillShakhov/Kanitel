@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Kanitel.Api;
 
 public sealed class AgentScheduler(
@@ -6,6 +8,12 @@ public sealed class AgentScheduler(
     IConfiguration configuration,
     ILogger<AgentScheduler> logger) : BackgroundService
 {
+    private const string AgentActionMarker = "KANITEL_ACTION:";
+    private static readonly JsonSerializerOptions AgentActionJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
     private readonly SemaphoreSlim _scanGate = new(1, 1);
 
     public async Task<SchedulerTickResult> ScanOnceAsync(CancellationToken cancellationToken = default)
@@ -204,20 +212,331 @@ public sealed class AgentScheduler(
                 task.UpdatedAt = DateTimeOffset.UtcNow;
             }
 
-            var commentBody = result.Success
-                ? $"Agent run completed.\n\n{Excerpt(result.Log)}"
-                : $"Agent run failed.\n\n{Excerpt(result.Log)}";
+            var outputAction = result.Success
+                ? TryParseAgentOutputAction(result.Log) ?? TryInferAgentOutputAction(state, task, storedRun?.TriggerCommentId)
+                : null;
+            var actionApplied = task is not null &&
+                outputAction is not null &&
+                ApplyAgentOutputAction(state, task, agentId, outputAction);
 
-            state.Comments.Add(new TaskComment
+            if (storedRun is not null && actionApplied)
             {
-                TaskId = taskId,
-                AuthorType = result.Success ? "agent" : "system",
-                AuthorId = result.Success ? agentId : "scheduler",
-                Body = commentBody
-            });
+                storedRun.Log = $"{storedRun.Log}\n\nKanitel agent action applied.";
+            }
+
+            if (!actionApplied)
+            {
+                var commentBody = result.Success
+                    ? $"Agent run completed.\n\n{Excerpt(result.Log)}"
+                    : $"Agent run failed.\n\n{Excerpt(result.Log)}";
+
+                state.Comments.Add(new TaskComment
+                {
+                    TaskId = taskId,
+                    AuthorType = result.Success ? "agent" : "system",
+                    AuthorId = result.Success ? agentId : "scheduler",
+                    Body = commentBody
+                });
+            }
 
             return true;
         }, cancellationToken);
+    }
+
+    private static AgentOutputAction? TryParseAgentOutputAction(string log)
+    {
+        if (string.IsNullOrWhiteSpace(log))
+        {
+            return null;
+        }
+
+        var markerIndex = log.LastIndexOf(AgentActionMarker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+        {
+            return null;
+        }
+
+        var jsonText = ExtractFirstJsonObject(log[(markerIndex + AgentActionMarker.Length)..]);
+        if (jsonText is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<AgentOutputAction>(jsonText, AgentActionJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static AgentOutputAction? TryInferAgentOutputAction(
+        KanitelState state,
+        TaskCard? task,
+        string? triggerCommentId)
+    {
+        if (task is null || string.IsNullOrWhiteSpace(triggerCommentId))
+        {
+            return null;
+        }
+
+        var trigger = state.Comments.FirstOrDefault(comment => comment.Id == triggerCommentId);
+        if (trigger is null || !string.Equals(trigger.AuthorType, "person", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var text = trigger.Body.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(text) ||
+            text.Contains("не закры", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("don't close", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("do not close", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (ContainsAny(text, "закрывай", "закрой", "закрыть задачу", "закрыть таск", "заверши", "завершай", "перенеси в done", "переведи в done", "move to done", "close task"))
+        {
+            return new AgentOutputAction
+            {
+                ColumnName = ResolveColumnName(state, task.ProjectId, "Done") ?? "Done",
+                UnassignAgent = true,
+                Body = "Done."
+            };
+        }
+
+        if (ContainsAny(text, "на ревью", "в ревью", "на review", "в review", "перенеси в review", "переведи в review", "move to review"))
+        {
+            return new AgentOutputAction
+            {
+                ColumnName = ResolveColumnName(state, task.ProjectId, "Review") ?? "Review",
+                Body = "Moved to review."
+            };
+        }
+
+        return null;
+    }
+
+    private static bool ContainsAny(string value, params string[] needles)
+    {
+        return needles.Any(needle => value.Contains(needle, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string? ResolveColumnName(KanitelState state, string projectId, string name)
+    {
+        return state.Columns.FirstOrDefault(column =>
+            column.ProjectId == projectId &&
+            string.Equals(column.Name, name, StringComparison.OrdinalIgnoreCase))?.Name;
+    }
+
+    private static string? ExtractFirstJsonObject(string value)
+    {
+        var start = value.IndexOf('{');
+        if (start < 0)
+        {
+            return null;
+        }
+
+        var depth = 0;
+        var inString = false;
+        var escaped = false;
+
+        for (var index = start; index < value.Length; index++)
+        {
+            var current = value[index];
+            if (inString)
+            {
+                if (escaped)
+                {
+                    escaped = false;
+                }
+                else if (current == '\\')
+                {
+                    escaped = true;
+                }
+                else if (current == '"')
+                {
+                    inString = false;
+                }
+
+                continue;
+            }
+
+            if (current == '"')
+            {
+                inString = true;
+                continue;
+            }
+
+            if (current == '{')
+            {
+                depth++;
+            }
+            else if (current == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return value[start..(index + 1)];
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static bool ApplyAgentOutputAction(
+        KanitelState state,
+        TaskCard task,
+        string agentId,
+        AgentOutputAction action)
+    {
+        var previousColumnId = task.ColumnId;
+        var previousTitle = task.Title;
+        var previousDescription = task.Description;
+        var previousStatus = DescribeColumn(state, task.ColumnId);
+        var previousAssignee = DescribeAssignee(state, task.AssigneePersonId, task.AssigneeAgentId);
+
+        if (!string.IsNullOrWhiteSpace(action.ColumnId) &&
+            state.Columns.Any(column => column.Id == action.ColumnId && column.ProjectId == task.ProjectId))
+        {
+            task.ColumnId = action.ColumnId.Trim();
+        }
+        else if (!string.IsNullOrWhiteSpace(action.ColumnName))
+        {
+            var column = state.Columns.FirstOrDefault(candidate =>
+                candidate.ProjectId == task.ProjectId &&
+                string.Equals(candidate.Name, action.ColumnName.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (column is not null)
+            {
+                task.ColumnId = column.Id;
+            }
+        }
+
+        if (action.UnassignAgent == true)
+        {
+            task.AssigneeAgentId = null;
+        }
+        else if (action.AssigneeAgentId is not null)
+        {
+            var assigneeAgentId = BlankToNull(action.AssigneeAgentId);
+            if (assigneeAgentId is null || CanAgentActOnProject(state, task.ProjectId, assigneeAgentId))
+            {
+                task.AssigneeAgentId = assigneeAgentId;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(action.Title))
+        {
+            task.Title = action.Title.Trim();
+        }
+
+        if (action.Description is not null)
+        {
+            task.Description = action.Description.Trim();
+        }
+
+        if (previousColumnId != task.ColumnId)
+        {
+            task.Position = state.Tasks
+                .Where(candidate => candidate.ProjectId == task.ProjectId && candidate.ColumnId == task.ColumnId && candidate.Id != task.Id)
+                .Select(candidate => candidate.Position)
+                .DefaultIfEmpty(-1)
+                .Max() + 1;
+            NormalizeTaskPositions(state, task.ProjectId, previousColumnId);
+            NormalizeTaskPositions(state, task.ProjectId, task.ColumnId);
+        }
+
+        AddChange(state, task, agentId, "title", previousTitle, task.Title);
+        AddChange(state, task, agentId, "description", previousDescription, task.Description);
+        AddChange(state, task, agentId, "status", previousStatus, DescribeColumn(state, task.ColumnId));
+        AddChange(state, task, agentId, "assignee", previousAssignee, DescribeAssignee(state, task.AssigneePersonId, task.AssigneeAgentId));
+
+        var body = BlankToNull(action.Body) ?? "Updated task.";
+        state.Comments.Add(new TaskComment
+        {
+            TaskId = task.Id,
+            AuthorType = "agent",
+            AuthorId = agentId,
+            Body = body
+        });
+
+        task.UpdatedAt = DateTimeOffset.UtcNow;
+        return true;
+    }
+
+    private static bool CanAgentActOnProject(KanitelState state, string projectId, string agentId)
+    {
+        return state.Agents.Any(agent => agent.Id == agentId && agent.Enabled) &&
+            state.ProjectAgents.Any(projectAgent => projectAgent.ProjectId == projectId && projectAgent.AgentId == agentId);
+    }
+
+    private static void AddChange(
+        KanitelState state,
+        TaskCard task,
+        string agentId,
+        string field,
+        string? from,
+        string? to)
+    {
+        var previous = from?.Trim() ?? "";
+        var next = to?.Trim() ?? "";
+        if (string.Equals(previous, next, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        state.History.Add(new TaskHistoryEntry
+        {
+            TaskId = task.Id,
+            AuthorType = "agent",
+            AuthorId = agentId,
+            Action = "changed",
+            Field = field,
+            From = previous,
+            To = next
+        });
+    }
+
+    private static string DescribeColumn(KanitelState state, string columnId)
+    {
+        return state.Columns.FirstOrDefault(column => column.Id == columnId)?.Name ?? columnId;
+    }
+
+    private static string DescribeAssignee(KanitelState state, string? personId, string? agentId)
+    {
+        if (!string.IsNullOrWhiteSpace(agentId))
+        {
+            return state.Agents.FirstOrDefault(agent => agent.Id == agentId)?.Name ?? agentId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(personId))
+        {
+            return state.People.FirstOrDefault(person => person.Id == personId)?.DisplayName ?? personId;
+        }
+
+        return "";
+    }
+
+    private static void NormalizeTaskPositions(KanitelState state, string projectId, string columnId)
+    {
+        var ordered = state.Tasks
+            .Where(task => task.ProjectId == projectId && task.ColumnId == columnId)
+            .OrderBy(task => task.Position)
+            .ThenBy(task => task.CreatedAt)
+            .ToList();
+
+        for (var index = 0; index < ordered.Count; index++)
+        {
+            ordered[index].Position = index;
+        }
+    }
+
+    private static string? BlankToNull(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
     private int ReadInt(string key, int fallback)
@@ -242,6 +561,17 @@ public sealed class AgentScheduler(
         string TaskId,
         string AgentId,
         string TriggerCommentId);
+
+    private sealed class AgentOutputAction
+    {
+        public string? Body { get; set; }
+        public string? ColumnId { get; set; }
+        public string? ColumnName { get; set; }
+        public string? AssigneeAgentId { get; set; }
+        public bool? UnassignAgent { get; set; }
+        public string? Title { get; set; }
+        public string? Description { get; set; }
+    }
 }
 
 public sealed record SchedulerTickResult(int QueuedRuns, string Status);

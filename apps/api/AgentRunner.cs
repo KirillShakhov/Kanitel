@@ -645,6 +645,8 @@ public sealed class DockerAgentRunner(
         prompt.AppendLine("- If the latest person comment explicitly confirms, approves, asks you to close, or asks you to move the task, perform that action through the Kanitel API instead of asking for confirmation again.");
         prompt.AppendLine("- When the task is complete or the user says to close it, move it to the Done column if one exists, add a final comment, and set unassignAgent=true.");
         prompt.AppendLine("- If the task is ready for human review but not complete, move it to Review if that column exists and leave a concise comment.");
+        prompt.AppendLine("- If tool calls or curl are unavailable, end your response with exactly one machine-readable action line: KANITEL_ACTION: {\"columnName\":\"Done\",\"unassignAgent\":true,\"body\":\"Done.\"}. Kanitel will apply it after the run.");
+        prompt.AppendLine("- If you successfully update Kanitel through curl, do not also print KANITEL_ACTION.");
         prompt.AppendLine("- Ask a follow-up question only when required information is genuinely missing.");
 
         prompt.AppendLine();
@@ -691,6 +693,8 @@ public sealed class DockerAgentRunner(
         prompt.AppendLine("Complete and unassign yourself:");
         prompt.AppendLine("curl -s -X PATCH \"$KANITEL_API_URL/api/agent/tasks/$KANITEL_TASK_ID\" -H 'Content-Type: application/json' -d '{\"agentId\":\"'\"$KANITEL_AGENT_ID\"'\",\"columnName\":\"Done\",\"unassignAgent\":true,\"body\":\"Done.\"}'");
         prompt.AppendLine("Assign or unassign an agent by PATCHing the same endpoint with assigneeAgentId or unassignAgent=true.");
+        prompt.AppendLine("Fallback without tools:");
+        prompt.AppendLine("KANITEL_ACTION: {\"columnName\":\"Done\",\"unassignAgent\":true,\"body\":\"Done.\"}");
         prompt.AppendLine();
         prompt.AppendLine("## Expected outcome");
         prompt.AppendLine("Work inside /workspace. If you change repositories, leave clear notes in your final response. Keep the response concise; Kanitel will attach it as an agent comment.");
