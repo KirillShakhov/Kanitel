@@ -403,6 +403,19 @@ textarea:focus {
   font-weight: 850;
 }
 
+.board-heading-actions {
+  display: flex;
+  align-items: end;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.board-filter {
+  width: min(280px, 52vw);
+  margin-bottom: 0;
+}
+
 .page-heading.compact {
   align-items: center;
 }
@@ -1147,6 +1160,19 @@ label {
   .primary-button,
   .secondary-button {
     flex: 1;
+  }
+
+  .page-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .board-heading-actions {
+    justify-content: space-between;
+  }
+
+  .board-filter {
+    width: min(100%, 320px);
   }
 
   .form-grid.two,

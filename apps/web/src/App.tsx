@@ -44,6 +44,7 @@ type Tab = 'board' | 'projects' | 'settings'
 type Theme = 'light' | 'dark'
 type Locale = 'ru' | 'en'
 type ParticipantKind = 'person' | 'agent'
+type AssigneeFilter = 'all' | 'unassigned' | string
 
 type EnvPair = {
   id: string
@@ -167,6 +168,8 @@ const labels = {
     authMode: 'Доступ',
     deleteRepository: 'Удалить репозиторий',
     addTask: 'Добавить задачу',
+    assigneeFilter: 'Фильтр по исполнителю',
+    allAssignees: 'Все исполнители',
     title: 'Заголовок',
     assignee: 'Исполнитель',
     noAssignee: 'Без исполнителя',
@@ -270,6 +273,8 @@ const labels = {
     authMode: 'Access',
     deleteRepository: 'Delete repository',
     addTask: 'Add task',
+    assigneeFilter: 'Filter by assignee',
+    allAssignees: 'All assignees',
     title: 'Title',
     assignee: 'Assignee',
     noAssignee: 'Unassigned',
@@ -352,6 +357,7 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>(() => readTheme())
   const [locale, setLocale] = useState<Locale>(() => readLocale())
   const [selectedTaskId, setSelectedTaskId] = useState('')
+  const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>(() => readAssigneeFilter())
   const [newTaskColumnId, setNewTaskColumnId] = useState('')
   const [draggedTaskId, setDraggedTaskId] = useState('')
   const [dragOverColumnId, setDragOverColumnId] = useState('')
@@ -404,6 +410,10 @@ export default function App() {
   }, [locale])
 
   useEffect(() => {
+    window.localStorage.setItem('kanitel-assignee-filter', assigneeFilter)
+  }, [assigneeFilter])
+
+  useEffect(() => {
     if (!authToken) {
       setBootstrap(null)
       setCurrentUser(null)
@@ -452,8 +462,20 @@ export default function App() {
     () => state && activeProject ? buildParticipants(state, activeProject.id) : [],
     [state, activeProject]
   )
+  const filteredTasks = useMemo(
+    () => tasks.filter(task => matchesAssigneeFilter(task, assigneeFilter)),
+    [tasks, assigneeFilter]
+  )
   const selectedTask = tasks.find(task => task.id === selectedTaskId)
   const selectedAgent = state?.agents.find(agent => agent.id === selectedAgentId)
+
+  useEffect(() => {
+    if (!state || !activeProject) return
+    if (assigneeFilter === 'all' || assigneeFilter === 'unassigned') return
+    if (!participants.some(participant => participant.key === assigneeFilter)) {
+      setAssigneeFilter('all')
+    }
+  }, [state, activeProject, assigneeFilter, participants])
 
   useEffect(() => {
     if (!activeProject) return
@@ -820,15 +842,17 @@ export default function App() {
           labels={t}
           project={activeProject}
           columns={columns}
-          tasks={tasks}
+          tasks={filteredTasks}
           participants={participants}
           runs={state.runs}
           taskDraft={taskDraft}
+          assigneeFilter={assigneeFilter}
           newTaskColumnId={newTaskColumnId}
           draggedTaskId={draggedTaskId}
           dragOverColumnId={dragOverColumnId}
           busy={busy}
           onOpenTask={setSelectedTaskId}
+          onAssigneeFilterChange={setAssigneeFilter}
           onOpenNewTask={(columnId) => {
             setNewTaskColumnId(columnId)
             setTaskDraft({ ...emptyTaskDraft, columnId })
@@ -1040,11 +1064,13 @@ function BoardPage({
   participants,
   runs,
   taskDraft,
+  assigneeFilter,
   newTaskColumnId,
   draggedTaskId,
   dragOverColumnId,
   busy,
   onOpenTask,
+  onAssigneeFilterChange,
   onOpenNewTask,
   onDraftChange,
   onCreateTask,
@@ -1059,11 +1085,13 @@ function BoardPage({
   participants: Participant[]
   runs: Array<{ taskId: string; status: string; createdAt: string }>
   taskDraft: TaskDraft
+  assigneeFilter: AssigneeFilter
   newTaskColumnId: string
   draggedTaskId: string
   dragOverColumnId: string
   busy: boolean
   onOpenTask: (id: string) => void
+  onAssigneeFilterChange: (filter: AssigneeFilter) => void
   onOpenNewTask: (columnId: string) => void
   onDraftChange: (draft: TaskDraft) => void
   onCreateTask: (columnId: string) => void
@@ -1078,7 +1106,19 @@ function BoardPage({
           <h2>{project.name}</h2>
           <p>{project.description || t.noDescription}</p>
         </div>
-        <span>{tasks.length}</span>
+        <div className="board-heading-actions">
+          <label className="board-filter">
+            {t.assigneeFilter}
+            <select value={assigneeFilter} onChange={event => onAssigneeFilterChange(event.target.value)}>
+              <option value="all">{t.allAssignees}</option>
+              <option value="unassigned">{t.noAssignee}</option>
+              {participants.map(participant => (
+                <option key={participant.key} value={participant.key}>{participant.name}</option>
+              ))}
+            </select>
+          </label>
+          <span>{tasks.length}</span>
+        </div>
       </div>
 
       <div className="board-scroll">
@@ -2028,6 +2068,13 @@ function splitAssignee(value: string) {
   return { assigneeAgentId: '', assigneePersonId: '' }
 }
 
+function matchesAssigneeFilter(task: TaskCard, filter: AssigneeFilter) {
+  if (filter === 'all') return true
+  const assignee = assigneeValue(task)
+  if (filter === 'unassigned') return !assignee
+  return assignee === filter
+}
+
 function initialAgentDraft(preset?: ProviderPreset, template?: AgentTemplate): AgentDraft {
   const selectedPreset = preset ?? {
     id: 'codex',
@@ -2158,4 +2205,8 @@ function readLocale(): Locale {
   const stored = window.localStorage.getItem('kanitel-locale')
   if (stored === 'ru' || stored === 'en') return stored
   return window.navigator.language.toLowerCase().startsWith('ru') ? 'ru' : 'en'
+}
+
+function readAssigneeFilter(): AssigneeFilter {
+  return window.localStorage.getItem('kanitel-assignee-filter') || 'all'
 }
