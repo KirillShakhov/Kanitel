@@ -2359,7 +2359,7 @@ function matchesAssigneeFilter(task: TaskCard, filter: AssigneeFilter) {
 function initialAgentDraft(preset?: ProviderPreset, template?: AgentTemplate): AgentDraft {
   const selectedPreset = preset ?? {
     id: 'codex',
-    name: 'Codex / OpenClaude',
+    name: 'Codex / OpenCode',
     provider: 'codex',
     defaultModel: 'codexplan',
     baseUrl: 'https://chatgpt.com/backend-api/codex',
@@ -2387,7 +2387,7 @@ function initialAgentDraft(preset?: ProviderPreset, template?: AgentTemplate): A
     apiKeyEnvName: selectedPreset.apiKeyEnvName,
     apiKeyValue: '',
     containerImage: 'node:22-bookworm',
-    commandTemplate: 'npx --yes --quiet --loglevel=error @gitlawb/openclaude@latest --bare --print "$(cat "$KANITEL_TASK_PROMPT_FILE")"',
+    commandTemplate: 'npx --yes --quiet --loglevel=error opencode-ai@latest run --pure --model "$KANITEL_OPENCODE_MODEL" "$(cat "$KANITEL_TASK_PROMPT_FILE")"',
     systemPrompt: selectedTemplate.systemPrompt,
     enabled: true,
     environment: envToPairs(selectedPreset.environment)

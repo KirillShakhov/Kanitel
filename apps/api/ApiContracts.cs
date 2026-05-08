@@ -89,10 +89,10 @@ public sealed record RepositoryRequest(
 
 /// <summary>Global AI agent profile payload.</summary>
 /// <param name="Name">Agent display name.</param>
-/// <param name="TemplateId">OpenClaude template id used for default prompt and tool tags.</param>
+/// <param name="TemplateId">Agent template id used for default prompt and tool tags.</param>
 /// <param name="AgentType">Internal agent type. Defaults from the selected template.</param>
 /// <param name="AvatarUrl">Agent avatar or provider logo URL.</param>
-/// <param name="ProviderPresetId">OpenClaude provider preset id, for example codex, anthropic, gemini, github-models, or github.</param>
+/// <param name="ProviderPresetId">Provider preset id, for example codex, anthropic, gemini, github-models, or github.</param>
 /// <param name="BaseUrl">Provider API base URL.</param>
 /// <param name="Model">Model name passed to the agent runtime.</param>
 /// <param name="ApiKeyEnvName">Host environment variable name containing the provider API key.</param>

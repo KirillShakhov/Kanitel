@@ -58,7 +58,7 @@ public static class SystemEndpoints
         })
             .WithTags("System")
             .WithSummary("Load application bootstrap")
-            .WithDescription("Returns the sanitized board state, current user if a bearer token is provided, provider presets copied from OpenClaude, agent templates, and scheduler settings. Account password hashes are never returned.");
+            .WithDescription("Returns the sanitized board state, current user if a bearer token is provided, provider presets, agent templates, and scheduler settings. Account password hashes are never returned.");
 
         app.MapPost("/api/scheduler/tick", async (AgentScheduler scheduler, CancellationToken cancellationToken) =>
         {

@@ -125,8 +125,8 @@ Kanitel creates a new data file; after that, manage agents in the UI.
 provider's expected key name. Set `AGENT_N_API_KEY_ENV` only when you need to override that target
 variable.
 
-For the GitHub Copilot preset, OpenClaude requires a non-interactive `GITHUB_TOKEN`/`GH_TOKEN`
-credential. Kanitel cannot run `/onboard-github` inside a disposable task container. A regular
+For the GitHub Copilot preset, OpenCode still needs a non-interactive `GITHUB_TOKEN`/`GH_TOKEN`
+credential. Kanitel cannot complete an interactive device login inside a disposable task container. A regular
 GitHub PAT works with the `github-models` provider (`https://models.github.ai/inference`), but
 not with `https://api.githubcopilot.com`. For GitHub Models, create a PAT with the `models`
 scope and select `GitHub Models (PAT)` in the agent settings.
@@ -162,12 +162,15 @@ Docker container: Kanitel copies the prepared workspace into the agent container
 then copies the result back. Use `bind` only when the workspace path is visible to the Docker daemon
 on the host.
 
-`KANITEL_DOCKER_NPM_CACHE_VOLUME` keeps the `npx @gitlawb/openclaude` package cache between
+`KANITEL_DOCKER_NPM_CACHE_VOLUME` keeps the `npx opencode-ai` package cache between
 disposable containers. Set it to `none` to disable the shared cache.
 
-The default OpenClaude command uses `--bare` for disposable Kanitel runs. That keeps GitHub Models
-requests small by disabling auto-discovery, background hooks, LSP/plugin sync, and the full default
-tool catalog while still leaving the agent with shell/read/edit capability inside its container.
+The default agent command uses OpenCode in non-interactive mode:
+`npx --yes --quiet --loglevel=error opencode-ai@latest run --pure --model "$KANITEL_OPENCODE_MODEL" ...`.
+Kanitel generates `OPENCODE_CONFIG_CONTENT` for each run from the agent settings, including provider
+base URL, model, API key env mapping, compact tool selection, and permissive permissions for the
+disposable workspace. GitHub Models runs through a generated OpenAI-compatible provider, which avoids
+OpenClaude's oversized tool catalog while still leaving the agent with shell/read/edit/curl access.
 
 Agents can report back with simple HTTP callbacks:
 

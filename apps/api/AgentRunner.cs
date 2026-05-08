@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace Kanitel.Api;
@@ -76,9 +77,10 @@ public sealed class DockerAgentRunner(
         {
             var dockerResult = await RunDockerAsync(run, agent, workspace, log, cancellationToken);
             log.AppendLine($"Agent container exit code: {dockerResult.ExitCode}.");
-            log.AppendLine(AnnotateAgentRunLog(agent, dockerResult.Log));
+            var agentLog = AnnotateAgentRunLog(agent, dockerResult.Log);
+            log.AppendLine(agentLog);
             return new AgentRunResult(
-                dockerResult.ExitCode == 0,
+                dockerResult.ExitCode == 0 && !IsAgentLogFailure(dockerResult.Log),
                 workspace,
                 TrimLog(log.ToString()),
                 dockerResult.ExitCode);
@@ -154,7 +156,7 @@ public sealed class DockerAgentRunner(
         StringBuilder log,
         CancellationToken cancellationToken)
     {
-        var command = RenderCommand(agent.CommandTemplate, run);
+        var command = PrepareCommandForAgent(RenderCommand(agent.CommandTemplate, run));
         var containerName = $"kanitel-agent-{run.Id}".Replace('_', '-');
         var image = string.IsNullOrWhiteSpace(agent.ContainerImage) ? "node:22-bookworm" : agent.ContainerImage;
         var workspaceMode = ReadString("KANITEL_DOCKER_WORKSPACE_MODE", "copy");
@@ -170,6 +172,7 @@ public sealed class DockerAgentRunner(
 
         log.AppendLine($"Starting Docker container {containerName} using image {image}.");
         log.AppendLine($"Docker workspace mode: {workspaceMode}.");
+        log.AppendLine($"Agent command: {command}");
         if (!IsDisabled(npmCacheVolume))
         {
             log.AppendLine($"Docker npm cache volume: {npmCacheVolume}.");
@@ -367,6 +370,8 @@ public sealed class DockerAgentRunner(
         env.TryAdd("DISABLE_AUTOUPDATER", "1");
         env.TryAdd("DISABLE_TELEMETRY", "1");
         env.TryAdd("DISABLE_COST_WARNINGS", "1");
+        env.TryAdd("NO_COLOR", "1");
+        env.TryAdd("FORCE_COLOR", "0");
 
         var providerApiKey = ResolveAgentApiKey(agent);
         if (!string.IsNullOrWhiteSpace(providerApiKey) &&
@@ -438,6 +443,20 @@ public sealed class DockerAgentRunner(
                 break;
         }
 
+        var opencodeApiKey = FirstNonEmpty(
+                env,
+                agent.ApiKeyEnvName,
+                "OPENAI_API_KEY",
+                "GITHUB_TOKEN",
+                "GH_TOKEN",
+                "ANTHROPIC_API_KEY",
+                "GEMINI_API_KEY")
+            ?? providerApiKey
+            ?? "local";
+        env["KANITEL_PROVIDER_API_KEY"] = opencodeApiKey;
+        env["KANITEL_OPENCODE_MODEL"] = BuildOpenCodeModelName(agent);
+        env["OPENCODE_CONFIG_CONTENT"] = BuildOpenCodeConfigContent(agent);
+
         return env;
     }
 
@@ -468,7 +487,7 @@ public sealed class DockerAgentRunner(
                 return """
                     GitHub Copilot authentication is required before this agent can run.
 
-                    Kanitel runs agents in disposable containers, so interactive `/onboard-github`
+                    Kanitel runs agents in disposable containers, so interactive GitHub device login
                     cannot be completed during a task run. Configure this agent with a valid
                     GITHUB_TOKEN/GH_TOKEN value, or switch the agent provider to GitHub Models (PAT),
                     OpenAI, Anthropic, Ollama, LM Studio, or another non-interactive provider.
@@ -492,7 +511,7 @@ public sealed class DockerAgentRunner(
                 return """
                     GitHub Copilot API does not accept a regular GitHub PAT for this endpoint.
 
-                    Use a Copilot OAuth token produced by OpenClaude `/onboard-github`, or switch
+                    Use a Copilot OAuth token produced by OpenCode login, or switch
                     this agent to GitHub Models (PAT) with a token that has the `models` scope.
                     """;
             }
@@ -523,11 +542,27 @@ public sealed class DockerAgentRunner(
             return $"""
                 {log}
 
-                GitHub Models rejected the OpenClaude request as too large. Kanitel's default command now uses OpenClaude --bare mode to avoid the oversized default tool catalog; if this agent has a custom command, add --bare before --print.
+                GitHub Models rejected the agent request as too large. Kanitel now defaults to OpenCode with a compact generated config; reduce KANITEL_AGENT_PROMPT_MAX_COMMENTS or KANITEL_AGENT_PROMPT_MAX_CHARS if this still happens.
                 """;
         }
 
         return log;
+    }
+
+    private static bool IsAgentLogFailure(string log)
+    {
+        if (string.IsNullOrWhiteSpace(log))
+        {
+            return false;
+        }
+
+        return log.Contains("\"type\":\"error\"", StringComparison.OrdinalIgnoreCase) ||
+            log.Contains("\"type\": \"error\"", StringComparison.OrdinalIgnoreCase) ||
+            log.Contains("APIError", StringComparison.OrdinalIgnoreCase) ||
+            log.Contains("Provider not found", StringComparison.OrdinalIgnoreCase) ||
+            log.Contains("Authentication failed", StringComparison.OrdinalIgnoreCase) ||
+            log.TrimStart().StartsWith("Error:", StringComparison.OrdinalIgnoreCase) ||
+            log.Contains("\nError:", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsGithubModelsAgent(AgentProfile agent)
@@ -562,6 +597,97 @@ public sealed class DockerAgentRunner(
             ?? "http://host.docker.internal:8080";
     }
 
+    private static string BuildOpenCodeModelName(AgentProfile agent)
+    {
+        var model = string.IsNullOrWhiteSpace(agent.Model) ? "gpt-4.1" : agent.Model.Trim();
+        return UsesOpenCodeCustomProvider(agent)
+            ? $"kanitel/{model}"
+            : $"{OpenCodeNativeProviderId(agent)}/{model}";
+    }
+
+    private static string BuildOpenCodeConfigContent(AgentProfile agent)
+    {
+        var model = string.IsNullOrWhiteSpace(agent.Model) ? "gpt-4.1" : agent.Model.Trim();
+        var config = new Dictionary<string, object?>
+        {
+            ["$schema"] = "https://opencode.ai/config.json",
+            ["autoupdate"] = false,
+            ["model"] = BuildOpenCodeModelName(agent),
+            ["small_model"] = BuildOpenCodeModelName(agent),
+            ["permission"] = "allow",
+            ["tools"] = new Dictionary<string, bool>
+            {
+                ["bash"] = true,
+                ["read"] = true,
+                ["edit"] = true,
+                ["write"] = true,
+                ["glob"] = true,
+                ["grep"] = true,
+                ["webfetch"] = false,
+                ["websearch"] = false,
+                ["task"] = false,
+                ["todowrite"] = false,
+                ["lsp"] = false,
+                ["skill"] = false
+            }
+        };
+
+        if (UsesOpenCodeCustomProvider(agent))
+        {
+            var baseUrl = string.IsNullOrWhiteSpace(agent.BaseUrl) ? "https://api.openai.com/v1" : agent.BaseUrl.TrimEnd('/');
+            config["provider"] = new Dictionary<string, object?>
+            {
+                ["kanitel"] = new Dictionary<string, object?>
+                {
+                    ["npm"] = "@ai-sdk/openai-compatible",
+                    ["name"] = string.IsNullOrWhiteSpace(agent.ProviderPresetId) ? "Kanitel provider" : agent.ProviderPresetId,
+                    ["options"] = new Dictionary<string, object?>
+                    {
+                        ["baseURL"] = baseUrl,
+                        ["apiKey"] = "{env:KANITEL_PROVIDER_API_KEY}"
+                    },
+                    ["models"] = new Dictionary<string, object?>
+                    {
+                        [model] = new Dictionary<string, object?>
+                        {
+                            ["name"] = model,
+                            ["limit"] = new Dictionary<string, int>
+                            {
+                                ["context"] = 128_000,
+                                ["output"] = 16_384
+                            }
+                        }
+                    }
+                }
+            };
+        }
+
+        return JsonSerializer.Serialize(config);
+    }
+
+    private static bool UsesOpenCodeCustomProvider(AgentProfile agent)
+    {
+        var provider = OpenCodeNativeProviderId(agent);
+        return provider is not "anthropic" and not "openai";
+    }
+
+    private static string OpenCodeNativeProviderId(AgentProfile agent)
+    {
+        if (string.Equals(agent.ProviderPresetId, "anthropic", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(agent.Provider, "anthropic", StringComparison.OrdinalIgnoreCase))
+        {
+            return "anthropic";
+        }
+
+        if (string.Equals(agent.ProviderPresetId, "openai", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(agent.Provider, "openai", StringComparison.OrdinalIgnoreCase))
+        {
+            return "openai";
+        }
+
+        return "kanitel";
+    }
+
     private string CreateWorkspacePath(string runId, string taskTitle)
     {
         var root = configuration["KANITEL_WORKSPACES_PATH"]
@@ -578,6 +704,16 @@ public sealed class DockerAgentRunner(
             .Replace("{{prompt_file}}", "$KANITEL_TASK_PROMPT_FILE", StringComparison.Ordinal)
             .Replace("{{task_id}}", run.TaskId, StringComparison.Ordinal)
             .Replace("{{run_id}}", run.Id, StringComparison.Ordinal));
+    }
+
+    private static string PrepareCommandForAgent(string command)
+    {
+        if (!command.Contains("@gitlawb/openclaude", StringComparison.OrdinalIgnoreCase))
+        {
+            return command;
+        }
+
+        return AgentCommandDefaults.CommandTemplate;
     }
 
     private string BuildPrompt(
@@ -985,6 +1121,7 @@ public sealed class DockerAgentRunner(
             return value;
         }
 
+        value = Regex.Replace(value, @"\x1B\[[0-?]*[ -/]*[@-~]", "");
         var lines = value.Replace("\r\n", "\n").Split('\n');
         var output = new List<string>();
         var repeated = new Dictionary<string, int>(StringComparer.Ordinal);

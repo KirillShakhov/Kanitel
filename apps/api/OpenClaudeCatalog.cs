@@ -4,14 +4,14 @@ public static class OpenClaudeCatalog
 {
     private const string LogoPrefix = "https://www.google.com/s2/favicons?sz=128&domain=";
 
-    // Provider presets are copied/adapted from openclaude integration descriptors.
+    // Provider presets are copied/adapted from coding-agent provider descriptors.
     // Local endpoints use host.docker.internal because Kanitel launches agents in child containers.
     public static IReadOnlyList<ProviderPreset> ProviderPresets { get; } =
     [
         new()
         {
             Id = "codex",
-            Name = "Codex / OpenClaude",
+            Name = "Codex / OpenCode",
             Provider = "codex",
             BaseUrl = "https://chatgpt.com/backend-api/codex",
             DefaultModel = "codexplan",
@@ -230,9 +230,9 @@ public static class OpenClaudeCatalog
             Id = "claude-code-guide",
             Name = "Claude Code Guide",
             AgentType = "claude-code-guide",
-            WhenToUse = "Help with OpenClaude or Claude Code style workflows and provider setup.",
+            WhenToUse = "Help with OpenCode or coding-agent workflows and provider setup.",
             ToolTags = ["read", "search"],
-            SystemPrompt = "You are an OpenClaude workflow guide. Help configure providers, agent routing, and coding-agent practices."
+            SystemPrompt = "You are an OpenCode workflow guide. Help configure providers, agent routing, and coding-agent practices."
         },
         new()
         {

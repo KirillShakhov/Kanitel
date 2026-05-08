@@ -41,7 +41,7 @@ public static class AgentEndpoints
         })
             .WithTags("Agents")
             .WithSummary("Create global agent")
-            .WithDescription("Creates a global AI agent profile from an OpenClaude provider preset and template. Agents are not project-specific until added to a project as participants.");
+            .WithDescription("Creates a global AI agent profile from a provider preset and template. Agents are not project-specific until added to a project as participants.");
 
         app.MapPatch("/api/agents/{agentId}", async (JsonDataStore store, string agentId, AgentRequest request, CancellationToken cancellationToken) =>
         {
