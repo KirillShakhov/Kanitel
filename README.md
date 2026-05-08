@@ -120,6 +120,10 @@ Kanitel creates a new data file; after that, manage agents in the UI.
 provider's expected key name. Set `AGENT_N_API_KEY_ENV` only when you need to override that target
 variable.
 
+For the GitHub Copilot preset, OpenClaude requires a non-interactive `GITHUB_TOKEN`/`GH_TOKEN`
+credential. Kanitel cannot run `/onboard-github` inside a disposable task container. A regular
+GitHub PAT works with GitHub Models endpoints, but not with `https://api.githubcopilot.com`.
+
 ## Agent Runtime
 
 Kanitel scans the board on an interval and starts an agent only when:

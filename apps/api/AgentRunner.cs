@@ -148,7 +148,14 @@ public sealed class DockerAgentRunner(
         var containerName = $"kanitel-agent-{run.Id}".Replace('_', '-');
         var image = string.IsNullOrWhiteSpace(agent.ContainerImage) ? "node:22-bookworm" : agent.ContainerImage;
         var workspaceMode = ReadString("KANITEL_DOCKER_WORKSPACE_MODE", "copy");
-        var dockerOptions = BuildDockerOptions(run, agent, containerName);
+        var agentEnvironment = BuildAgentEnvironment(agent);
+        var validationError = ValidateAgentEnvironment(agent, agentEnvironment);
+        if (validationError is not null)
+        {
+            return new ProcessResult(2, validationError);
+        }
+
+        var dockerOptions = BuildDockerOptions(run, agent, containerName, agentEnvironment);
 
         log.AppendLine($"Starting Docker container {containerName} using image {image}.");
         log.AppendLine($"Docker workspace mode: {workspaceMode}.");
@@ -158,7 +165,11 @@ public sealed class DockerAgentRunner(
             : await RunDockerWithCopiedWorkspaceAsync(containerName, image, command, dockerOptions, workspace, cancellationToken);
     }
 
-    private List<string> BuildDockerOptions(AgentRun run, AgentProfile agent, string containerName)
+    private List<string> BuildDockerOptions(
+        AgentRun run,
+        AgentProfile agent,
+        string containerName,
+        IReadOnlyDictionary<string, string> agentEnvironment)
     {
         var dockerOptions = new List<string>
         {
@@ -186,7 +197,6 @@ public sealed class DockerAgentRunner(
             dockerOptions.Add("host.docker.internal:host-gateway");
         }
 
-        var agentEnvironment = BuildAgentEnvironment(agent);
         foreach (var (key, value) in agentEnvironment)
         {
             dockerOptions.Add("-e");
@@ -324,6 +334,8 @@ public sealed class DockerAgentRunner(
             }
         }
 
+        RemoveProviderSelectionFlags(env);
+
         var providerApiKey = ResolveAgentApiKey(agent);
         if (!string.IsNullOrWhiteSpace(providerApiKey) &&
             !string.IsNullOrWhiteSpace(agent.ApiKeyEnvName) &&
@@ -383,6 +395,53 @@ public sealed class DockerAgentRunner(
         }
 
         return env;
+    }
+
+    private static string? ValidateAgentEnvironment(
+        AgentProfile agent,
+        IReadOnlyDictionary<string, string> env)
+    {
+        if (IsTruthy(ReadEnv(env, "CLAUDE_CODE_USE_GITHUB")))
+        {
+            var token = FirstNonEmpty(env, "GITHUB_TOKEN", "GH_TOKEN")
+                ?? ResolveHostEnv("GITHUB_TOKEN")
+                ?? ResolveHostEnv("GH_TOKEN");
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                return """
+                    GitHub Copilot authentication is required before this agent can run.
+
+                    Kanitel runs agents in disposable containers, so interactive `/onboard-github`
+                    cannot be completed during a task run. Configure this agent with a valid
+                    GITHUB_TOKEN/GH_TOKEN value, or switch the agent provider to OpenAI,
+                    Anthropic, Ollama, LM Studio, or another non-interactive provider.
+                    """;
+            }
+        }
+
+        if (agent.ProviderPresetId == "github" &&
+            string.Equals(agent.BaseUrl.TrimEnd('/'), "https://api.githubcopilot.com", StringComparison.OrdinalIgnoreCase))
+        {
+            var token = FirstNonEmpty(env, "GITHUB_TOKEN", "GH_TOKEN")
+                ?? ResolveHostEnv("GITHUB_TOKEN")
+                ?? ResolveHostEnv("GH_TOKEN");
+            if (token is not null &&
+                (token.StartsWith("ghp_", StringComparison.Ordinal) ||
+                 token.StartsWith("gho_", StringComparison.Ordinal) ||
+                 token.StartsWith("ghs_", StringComparison.Ordinal) ||
+                 token.StartsWith("ghr_", StringComparison.Ordinal) ||
+                 token.StartsWith("github_pat_", StringComparison.Ordinal)))
+            {
+                return """
+                    GitHub Copilot API does not accept a regular GitHub PAT for this endpoint.
+
+                    Use a Copilot OAuth token produced by OpenClaude `/onboard-github`, or switch
+                    this agent to a provider that supports plain API keys.
+                    """;
+            }
+        }
+
+        return null;
     }
 
     private string GetPublicApiUrl()
@@ -538,6 +597,45 @@ public sealed class DockerAgentRunner(
         return ResolveHostEnv(agent.ApiKeySourceEnvName) ?? ResolveHostEnv(agent.ApiKeyEnvName);
     }
 
+    private static void RemoveProviderSelectionFlags(Dictionary<string, string> env)
+    {
+        foreach (var key in ProviderSelectionEnvNames)
+        {
+            env.Remove(key);
+        }
+    }
+
+    private static bool IsTruthy(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        return !value.Equals("0", StringComparison.OrdinalIgnoreCase) &&
+            !value.Equals("false", StringComparison.OrdinalIgnoreCase) &&
+            !value.Equals("no", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? ReadEnv(IReadOnlyDictionary<string, string> env, string key)
+    {
+        return env.TryGetValue(key, out var value) ? value : null;
+    }
+
+    private static string? FirstNonEmpty(IReadOnlyDictionary<string, string> env, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            var value = ReadEnv(env, key);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
     private async Task<int> InspectContainerExitCodeAsync(
         string containerName,
         int fallback,
@@ -612,6 +710,7 @@ public sealed class DockerAgentRunner(
         "GOOGLE_API_KEY",
         "GEMINI_ACCESS_TOKEN",
         "GITHUB_TOKEN",
+        "GH_TOKEN",
         "MISTRAL_API_KEY",
         "DEEPSEEK_API_KEY",
         "OPENROUTER_API_KEY",
@@ -628,6 +727,17 @@ public sealed class DockerAgentRunner(
         "BNKR_API_KEY",
         "AWS_BEARER_TOKEN_BEDROCK",
         "GOOGLE_APPLICATION_CREDENTIALS"
+    ];
+
+    private static readonly string[] ProviderSelectionEnvNames =
+    [
+        "CLAUDE_CODE_USE_OPENAI",
+        "CLAUDE_CODE_USE_GEMINI",
+        "CLAUDE_CODE_USE_MISTRAL",
+        "CLAUDE_CODE_USE_GITHUB",
+        "CLAUDE_CODE_USE_BEDROCK",
+        "CLAUDE_CODE_USE_VERTEX",
+        "CLAUDE_CODE_USE_FOUNDRY"
     ];
 
     private static async Task<ProcessResult> RunProcessAsync(
