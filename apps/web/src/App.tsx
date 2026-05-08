@@ -78,9 +78,6 @@ type ParticipantDraft = {
   kind: ParticipantKind
   personId: string
   agentId: string
-  displayName: string
-  email: string
-  avatarUrl: string
 }
 
 type AgentDraft = {
@@ -156,9 +153,6 @@ const labels = {
     selectPerson: 'Выбрать человека',
     selectAgent: 'Выбрать агента',
     remove: 'Убрать',
-    existingPerson: 'Существующий человек',
-    newPersonName: 'Имя нового человека',
-    newPersonEmail: 'Email нового человека',
     deleteAgent: 'Удалить агента',
     envKey: 'Переменная',
     envValue: 'Значение',
@@ -254,9 +248,6 @@ const labels = {
     selectPerson: 'Select person',
     selectAgent: 'Select agent',
     remove: 'Remove',
-    existingPerson: 'Existing person',
-    newPersonName: 'New person name',
-    newPersonEmail: 'New person email',
     deleteAgent: 'Delete agent',
     envKey: 'Variable',
     envValue: 'Value',
@@ -328,10 +319,7 @@ const emptyAuthDraft: AuthDraft = {
 const emptyParticipantDraft: ParticipantDraft = {
   kind: 'person',
   personId: '',
-  agentId: '',
-  displayName: '',
-  email: '',
-  avatarUrl: '',
+  agentId: ''
 }
 
 export default function App() {
@@ -630,12 +618,9 @@ export default function App() {
       return
     }
 
-    if (!participantDraft.personId && !participantDraft.displayName.trim() && !participantDraft.email.trim()) return
+    if (!participantDraft.personId) return
     await mutate(postJson(`/api/projects/${activeProject.id}/members`, {
-      personId: participantDraft.personId,
-      displayName: participantDraft.displayName,
-      email: participantDraft.email,
-      avatarUrl: participantDraft.avatarUrl
+      personId: participantDraft.personId
     }))
     setParticipantDraft(emptyParticipantDraft)
   }
@@ -717,7 +702,7 @@ export default function App() {
 
   const selectedTaskComments = state.comments
     .filter(comment => comment.taskId === selectedTask?.id)
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   const selectedTaskRuns = state.runs
     .filter(run => run.taskId === selectedTask?.id)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -1239,6 +1224,13 @@ function TaskModal({
             </label>
             <section className="comments task-comments">
               <h3><MessageSquare size={16} />{t.comments}</h3>
+              <div className="comment-form">
+                <textarea value={commentDraft} onChange={event => onCommentDraftChange(event.target.value)} placeholder={t.commentPlaceholder} rows={3} />
+                <button className="secondary-button" onClick={onAddComment} disabled={busy}>
+                  <MessageSquare size={16} />
+                  {t.send}
+                </button>
+              </div>
               {comments.map(comment => (
                 <article className={`comment ${comment.authorType}`} key={comment.id}>
                   <div>
@@ -1248,13 +1240,6 @@ function TaskModal({
                   <p>{comment.body}</p>
                 </article>
               ))}
-              <div className="comment-form">
-                <textarea value={commentDraft} onChange={event => onCommentDraftChange(event.target.value)} placeholder={t.commentPlaceholder} rows={3} />
-                <button className="secondary-button" onClick={onAddComment} disabled={busy}>
-                  <MessageSquare size={16} />
-                  {t.send}
-                </button>
-              </div>
             </section>
           </div>
 
@@ -1416,8 +1401,8 @@ function ProjectsPage({
                   </div>
                 ))}
                 <div className="settings-row add-row">
-                  <input value={columnDraft.name} onChange={event => onColumnDraftChange({ ...columnDraft, name: event.target.value })} placeholder={t.columnName} />
                   <input className="color-input" type="color" value={columnDraft.color} onChange={event => onColumnDraftChange({ ...columnDraft, color: event.target.value })} />
+                  <input value={columnDraft.name} onChange={event => onColumnDraftChange({ ...columnDraft, name: event.target.value })} placeholder={t.columnName} />
                   <button className="icon-button compact" title={t.addColumn} onClick={onAddColumn}>
                     <Plus size={15} />
                   </button>
@@ -1448,25 +1433,15 @@ function ProjectsPage({
                     </select>
                   </label>
                   {participantDraft.kind === 'person' ? (
-                    <>
-                      <label>
-                        {t.existingPerson}
-                        <select value={participantDraft.personId} onChange={event => onParticipantDraftChange({ ...participantDraft, personId: event.target.value })}>
-                          <option value="">{t.selectPerson}</option>
-                          {state.people.map(person => (
-                            <option key={person.id} value={person.id}>{person.displayName}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        {t.newPersonName}
-                        <input value={participantDraft.displayName} onChange={event => onParticipantDraftChange({ ...participantDraft, displayName: event.target.value })} placeholder={t.displayName} />
-                      </label>
-                      <label>
-                        {t.newPersonEmail}
-                        <input value={participantDraft.email} onChange={event => onParticipantDraftChange({ ...participantDraft, email: event.target.value })} placeholder={t.email} />
-                      </label>
-                    </>
+                    <label className="participant-wide">
+                      {t.selectPerson}
+                      <select value={participantDraft.personId} onChange={event => onParticipantDraftChange({ ...participantDraft, personId: event.target.value })}>
+                        <option value="">{t.selectPerson}</option>
+                        {state.people.map(person => (
+                          <option key={person.id} value={person.id}>{person.displayName}</option>
+                        ))}
+                      </select>
+                    </label>
                   ) : (
                     <label className="participant-wide">
                       {t.selectAgent}

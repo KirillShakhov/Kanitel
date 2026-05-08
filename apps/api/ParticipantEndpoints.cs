@@ -35,37 +35,19 @@ public static class ParticipantEndpoints
         {
             var result = await store.MutateAsync<object?>(state =>
             {
-                if (state.Projects.All(p => p.Id != projectId))
+                if (state.Projects.All(p => p.Id != projectId) || string.IsNullOrWhiteSpace(request.PersonId))
                 {
                     return null;
                 }
 
-                var person = !string.IsNullOrWhiteSpace(request.PersonId)
-                    ? state.People.FirstOrDefault(p => p.Id == request.PersonId)
-                    : state.People.FirstOrDefault(p => !string.IsNullOrWhiteSpace(request.Email) && string.Equals(p.Email, request.Email, StringComparison.OrdinalIgnoreCase));
-
+                var personId = request.PersonId.Trim();
+                var person = state.People.FirstOrDefault(p => p.Id == personId);
                 if (person is null)
                 {
-                    if (string.IsNullOrWhiteSpace(request.DisplayName))
-                    {
-                        return null;
-                    }
-
-                    person = new Person
-                    {
-                        DisplayName = request.DisplayName.Trim(),
-                        Email = request.Email?.Trim() ?? "",
-                        AvatarUrl = request.AvatarUrl?.Trim() ?? ""
-                    };
-                    state.People.Add(person);
+                    return null;
                 }
 
                 var existing = state.Members.FirstOrDefault(m => m.ProjectId == projectId && m.PersonId == person.Id);
-                if (request.AvatarUrl is not null)
-                {
-                    person.AvatarUrl = request.AvatarUrl.Trim();
-                }
-
                 if (existing is not null)
                 {
                     return new { person, member = existing };
@@ -84,7 +66,7 @@ public static class ParticipantEndpoints
         })
             .WithTags("Participants")
             .WithSummary("Add project person")
-            .WithDescription("Adds a person to a project by existing person id or by email/display name. If the person is already a member, the existing participant link is returned.");
+            .WithDescription("Adds an existing registered person to a project. If the person is already a member, the existing participant link is returned.");
 
         app.MapDelete("/api/members/{memberId}", async (JsonDataStore store, string memberId, CancellationToken cancellationToken) =>
         {

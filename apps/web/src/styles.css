@@ -694,6 +694,7 @@ label {
 .comment-form {
   display: grid;
   gap: 8px;
+  margin-bottom: 12px;
 }
 
 .runs-panel {
@@ -801,6 +802,10 @@ label {
   grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
+.settings-row.add-row {
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+}
+
 .participant-row {
   grid-template-columns: auto minmax(0, 1fr) auto;
 }
@@ -865,9 +870,21 @@ label {
 }
 
 .color-input {
-  width: 44px;
-  min-width: 44px;
-  padding: 3px;
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  padding: 4px;
+  cursor: pointer;
+}
+
+.color-input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.color-input::-webkit-color-swatch,
+.color-input::-moz-color-swatch {
+  border: 0;
+  border-radius: 5px;
 }
 
 .settings-page {

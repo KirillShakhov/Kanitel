@@ -69,15 +69,8 @@ public sealed record ColumnRequest(
 public sealed record PersonRequest(string DisplayName, string? Email, string? AvatarUrl);
 
 /// <summary>Project human participant payload.</summary>
-/// <param name="PersonId">Existing person id. If omitted, Kanitel can create or find a person by email.</param>
-/// <param name="DisplayName">Name for a new person when PersonId is omitted.</param>
-/// <param name="Email">Email used to find or create a person.</param>
-/// <param name="AvatarUrl">Optional avatar URL for the person profile.</param>
-public sealed record MemberRequest(
-    string? PersonId,
-    string? DisplayName,
-    string? Email,
-    string? AvatarUrl);
+/// <param name="PersonId">Existing registered person id.</param>
+public sealed record MemberRequest(string PersonId);
 
 /// <summary>Git repository link payload.</summary>
 /// <param name="Name">Display name. Defaults to the URL when omitted.</param>
