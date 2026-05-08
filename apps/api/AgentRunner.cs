@@ -55,6 +55,7 @@ public sealed class DockerAgentRunner(
         var prompt = BuildPrompt(project, agent, task, comments, people, agents, columns, repositories);
         var promptPath = Path.Combine(workspace, "task.md");
         await File.WriteAllTextAsync(promptPath, prompt, cancellationToken);
+        log.AppendLine($"Task prompt: {prompt.Length:n0} characters.");
 
         if (IsMockRunner())
         {
@@ -469,7 +470,7 @@ public sealed class DockerAgentRunner(
             .Replace("{{run_id}}", run.Id, StringComparison.Ordinal));
     }
 
-    private static string BuildPrompt(
+    private string BuildPrompt(
         Project project,
         AgentProfile agent,
         TaskCard task,
@@ -481,8 +482,16 @@ public sealed class DockerAgentRunner(
     {
         var statusColumn = columns.FirstOrDefault(column => column.Id == task.ColumnId);
         var firstComment = comments.OrderBy(comment => comment.CreatedAt).FirstOrDefault();
+        var conversationComments = comments
+            .Where(comment => !string.Equals(comment.AuthorType, "system", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(comment => comment.CreatedAt)
+            .ToList();
+        var maxConversationComments = ReadInt("KANITEL_AGENT_PROMPT_MAX_COMMENTS", 25);
+        var skippedComments = Math.Max(0, conversationComments.Count - maxConversationComments);
+        var recentConversation = conversationComments.Skip(skippedComments).ToList();
+
         var prompt = new StringBuilder();
-        prompt.AppendLine(agent.SystemPrompt);
+        prompt.AppendLine(TruncateForPrompt(agent.SystemPrompt, ReadInt("KANITEL_AGENT_PROMPT_SYSTEM_MAX_CHARS", 12_000)));
         prompt.AppendLine();
         prompt.AppendLine("# Kanitel Task");
         prompt.AppendLine($"Project: {project.Name}");
@@ -494,7 +503,7 @@ public sealed class DockerAgentRunner(
         prompt.AppendLine($"Author: {(firstComment is null ? "unknown" : AuthorLabel(firstComment, people, agents))}");
         prompt.AppendLine();
         prompt.AppendLine("## Description");
-        prompt.AppendLine(task.Description);
+        prompt.AppendLine(TruncateForPrompt(task.Description, ReadInt("KANITEL_AGENT_PROMPT_DESCRIPTION_MAX_CHARS", 20_000)));
         prompt.AppendLine();
         prompt.AppendLine("## Linked repositories");
         if (repositories.Count == 0)
@@ -520,10 +529,23 @@ public sealed class DockerAgentRunner(
 
         prompt.AppendLine();
         prompt.AppendLine("## Conversation");
-        foreach (var comment in comments.OrderBy(c => c.CreatedAt))
+        if (comments.Count != conversationComments.Count)
+        {
+            prompt.AppendLine($"- {comments.Count - conversationComments.Count} system status/log comment(s) omitted from agent context.");
+            prompt.AppendLine();
+        }
+
+        if (skippedComments > 0)
+        {
+            prompt.AppendLine($"- {skippedComments} older conversation comment(s) omitted to keep the request small.");
+            prompt.AppendLine();
+        }
+
+        var maxCommentChars = ReadInt("KANITEL_AGENT_PROMPT_COMMENT_MAX_CHARS", 6_000);
+        foreach (var comment in recentConversation)
         {
             prompt.AppendLine($"[{comment.CreatedAt:u}] {AuthorLabel(comment, people, agents)}");
-            prompt.AppendLine(comment.Body);
+            prompt.AppendLine(TruncateForPrompt(comment.Body, maxCommentChars));
             prompt.AppendLine();
         }
 
@@ -537,7 +559,23 @@ public sealed class DockerAgentRunner(
         prompt.AppendLine();
         prompt.AppendLine("## Expected outcome");
         prompt.AppendLine("Work inside /workspace. If you change repositories, leave clear notes in your final response. Keep the response concise; Kanitel will attach it as an agent comment.");
-        return prompt.ToString();
+        return TruncateForPrompt(prompt.ToString(), ReadInt("KANITEL_AGENT_PROMPT_MAX_CHARS", 120_000));
+    }
+
+    private static string TruncateForPrompt(string? value, int maxChars)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "";
+        }
+
+        if (maxChars <= 0 || value.Length <= maxChars)
+        {
+            return value;
+        }
+
+        var omitted = value.Length - maxChars;
+        return $"{value[..maxChars]}\n\n[Kanitel truncated {omitted:n0} character(s) to keep the agent request small.]";
     }
 
     private static string AuthorLabel(

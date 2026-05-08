@@ -90,6 +90,10 @@ KANITEL_AGENT_POLL_INTERVAL_SECONDS=20
 KANITEL_AGENT_TIMEOUT_MINUTES=30
 KANITEL_PUBLIC_API_URL=http://host.docker.internal:8080
 KANITEL_DOCKER_ADD_HOST_GATEWAY=true
+KANITEL_AGENT_PROMPT_MAX_CHARS=120000
+KANITEL_AGENT_PROMPT_MAX_COMMENTS=25
+KANITEL_AGENT_PROMPT_COMMENT_MAX_CHARS=6000
+KANITEL_AGENT_PROMPT_DESCRIPTION_MAX_CHARS=20000
 ```
 
 Initial agents can be declared in indexed env blocks. Empty blocks are ignored.
@@ -136,6 +140,12 @@ Kanitel scans the board on an interval and starts an agent only when:
 
 When an agent runs, Kanitel creates an isolated workspace container and passes context through
 environment variables:
+
+Kanitel omits system run logs from the agent prompt and limits long descriptions/comments before
+calling the provider. Tune `KANITEL_AGENT_PROMPT_MAX_CHARS`, `KANITEL_AGENT_PROMPT_MAX_COMMENTS`,
+`KANITEL_AGENT_PROMPT_SYSTEM_MAX_CHARS`, `KANITEL_AGENT_PROMPT_COMMENT_MAX_CHARS`, and
+`KANITEL_AGENT_PROMPT_DESCRIPTION_MAX_CHARS` if your provider has a tighter or wider request-size
+limit.
 
 ```dotenv
 KANITEL_DOCKER_WORKSPACE_MODE=copy
