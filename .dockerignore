@@ -1,0 +1,13 @@
+.git
+.vs
+.idea
+.vscode
+node_modules
+dist
+bin
+obj
+data
+workspaces
+.env
+*.log
+*.tsbuildinfo

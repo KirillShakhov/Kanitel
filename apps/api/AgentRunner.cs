@@ -1,0 +1,518 @@
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Text;
+using System.Text.RegularExpressions;
+
+namespace Kanitel.Api;
+
+public interface IAgentRunner
+{
+    Task<AgentRunResult> RunAsync(
+        AgentRun run,
+        Project project,
+        AgentProfile agent,
+        TaskCard task,
+        IReadOnlyList<TaskComment> comments,
+        IReadOnlyList<BoardColumn> columns,
+        IReadOnlyList<RepositoryLink> repositories,
+        CancellationToken cancellationToken);
+}
+
+public sealed record AgentRunResult(
+    bool Success,
+    string WorkspacePath,
+    string Log,
+    int? ExitCode);
+
+public sealed class DockerAgentRunner(
+    IConfiguration configuration,
+    IWebHostEnvironment environment,
+    ILogger<DockerAgentRunner> logger) : IAgentRunner
+{
+    public async Task<AgentRunResult> RunAsync(
+        AgentRun run,
+        Project project,
+        AgentProfile agent,
+        TaskCard task,
+        IReadOnlyList<TaskComment> comments,
+        IReadOnlyList<BoardColumn> columns,
+        IReadOnlyList<RepositoryLink> repositories,
+        CancellationToken cancellationToken)
+    {
+        var workspace = CreateWorkspacePath(run.Id, task.Title);
+        Directory.CreateDirectory(workspace);
+
+        var log = new StringBuilder();
+        log.AppendLine($"Kanitel run {run.Id}");
+        log.AppendLine($"Workspace: {workspace}");
+
+        await CloneRepositoriesAsync(repositories, workspace, log, cancellationToken);
+
+        var prompt = BuildPrompt(project, agent, task, comments, columns, repositories);
+        var promptPath = Path.Combine(workspace, "task.md");
+        await File.WriteAllTextAsync(promptPath, prompt, cancellationToken);
+
+        if (IsMockRunner())
+        {
+            log.AppendLine("Mock runner enabled; no Docker container was started.");
+            log.AppendLine(prompt);
+            return new AgentRunResult(true, workspace, TrimLog(log.ToString()), 0);
+        }
+
+        try
+        {
+            var dockerResult = await RunDockerAsync(run, agent, workspace, log, cancellationToken);
+            log.AppendLine(dockerResult.Log);
+            return new AgentRunResult(
+                dockerResult.ExitCode == 0,
+                workspace,
+                TrimLog(log.ToString()),
+                dockerResult.ExitCode);
+        }
+        catch (Win32Exception ex)
+        {
+            log.AppendLine($"Failed to start Docker CLI: {ex.Message}");
+            logger.LogWarning(ex, "Docker CLI is unavailable for agent run {RunId}", run.Id);
+            return new AgentRunResult(false, workspace, TrimLog(log.ToString()), null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            log.AppendLine($"Runner failed: {ex.Message}");
+            logger.LogError(ex, "Agent run {RunId} failed", run.Id);
+            return new AgentRunResult(false, workspace, TrimLog(log.ToString()), null);
+        }
+    }
+
+    private async Task CloneRepositoriesAsync(
+        IReadOnlyList<RepositoryLink> repositories,
+        string workspace,
+        StringBuilder log,
+        CancellationToken cancellationToken)
+    {
+        if (repositories.Count == 0)
+        {
+            log.AppendLine("No repositories linked to this project.");
+            return;
+        }
+
+        var reposRoot = Path.Combine(workspace, "repos");
+        Directory.CreateDirectory(reposRoot);
+
+        foreach (var repo in repositories)
+        {
+            if (string.IsNullOrWhiteSpace(repo.Url))
+            {
+                continue;
+            }
+
+            var folder = SanitizePathSegment(string.IsNullOrWhiteSpace(repo.Name) ? repo.Id : repo.Name);
+            var target = Path.Combine(reposRoot, folder);
+            var args = new List<string> { "clone", "--depth", "1" };
+            if (!string.IsNullOrWhiteSpace(repo.Branch))
+            {
+                args.Add("--branch");
+                args.Add(repo.Branch);
+            }
+
+            args.Add(repo.Url);
+            args.Add(target);
+
+            try
+            {
+                var result = await RunProcessAsync("git", args, workspace, null, TimeSpan.FromMinutes(10), cancellationToken);
+                log.AppendLine($"git clone {repo.Name}: exit {result.ExitCode}");
+                if (!string.IsNullOrWhiteSpace(result.Log))
+                {
+                    log.AppendLine(result.Log);
+                }
+            }
+            catch (Win32Exception ex)
+            {
+                log.AppendLine($"git is unavailable; repository {repo.Name} was not cloned: {ex.Message}");
+            }
+        }
+    }
+
+    private async Task<ProcessResult> RunDockerAsync(
+        AgentRun run,
+        AgentProfile agent,
+        string workspace,
+        StringBuilder log,
+        CancellationToken cancellationToken)
+    {
+        var command = RenderCommand(agent.CommandTemplate, run);
+        var containerName = $"kanitel-agent-{run.Id}".Replace('_', '-');
+        var dockerArgs = new List<string>
+        {
+            "run",
+            "--rm",
+            "--name",
+            containerName,
+            "-v",
+            $"{workspace}:/workspace",
+            "-w",
+            "/workspace",
+            "-e",
+            "KANITEL_TASK_PROMPT_FILE=/workspace/task.md",
+            "-e",
+            $"KANITEL_TASK_ID={run.TaskId}",
+            "-e",
+            $"KANITEL_RUN_ID={run.Id}",
+            "-e",
+            $"KANITEL_AGENT_ID={run.AgentId}",
+            "-e",
+            $"KANITEL_PROJECT_ID={run.ProjectId}",
+            "-e",
+            $"KANITEL_API_URL={GetPublicApiUrl()}"
+        };
+
+        if (ReadBool("KANITEL_DOCKER_ADD_HOST_GATEWAY", true))
+        {
+            dockerArgs.Add("--add-host");
+            dockerArgs.Add("host.docker.internal:host-gateway");
+        }
+
+        var agentEnvironment = BuildAgentEnvironment(agent);
+        foreach (var (key, value) in agentEnvironment)
+        {
+            dockerArgs.Add("-e");
+            dockerArgs.Add($"{key}={value}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(agent.ApiKeyEnvName) &&
+            !agent.Environment.ContainsKey(agent.ApiKeyEnvName))
+        {
+            dockerArgs.Add("-e");
+            dockerArgs.Add(agent.ApiKeyEnvName);
+        }
+
+        foreach (var envName in KnownProviderEnvNames)
+        {
+            if (!agent.Environment.ContainsKey(envName) &&
+                !string.Equals(envName, agent.ApiKeyEnvName, StringComparison.OrdinalIgnoreCase) &&
+                !agentEnvironment.ContainsKey(envName))
+            {
+                dockerArgs.Add("-e");
+                dockerArgs.Add(envName);
+            }
+        }
+
+        dockerArgs.Add(string.IsNullOrWhiteSpace(agent.ContainerImage) ? "node:22-bookworm" : agent.ContainerImage);
+        dockerArgs.Add("/bin/sh");
+        dockerArgs.Add("-lc");
+        dockerArgs.Add(command);
+
+        log.AppendLine($"Starting Docker container {containerName} using image {agent.ContainerImage}.");
+        return await RunProcessAsync(
+            "docker",
+            dockerArgs,
+            workspace,
+            null,
+            TimeSpan.FromMinutes(ReadInt("KANITEL_AGENT_TIMEOUT_MINUTES", 30)),
+            cancellationToken);
+    }
+
+    private Dictionary<string, string> BuildAgentEnvironment(AgentProfile agent)
+    {
+        var env = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in agent.Environment)
+        {
+            if (!string.IsNullOrWhiteSpace(pair.Key))
+            {
+                env[pair.Key] = pair.Value;
+            }
+        }
+
+        switch ((agent.ProviderPresetId, agent.Provider))
+        {
+            case ("anthropic", _):
+            case (_, "anthropic"):
+                env["ANTHROPIC_BASE_URL"] = agent.BaseUrl;
+                env["ANTHROPIC_MODEL"] = agent.Model;
+                break;
+            case ("gemini", _):
+            case (_, "gemini"):
+                env["CLAUDE_CODE_USE_GEMINI"] = "1";
+                env["GEMINI_BASE_URL"] = agent.BaseUrl;
+                env["GEMINI_MODEL"] = agent.Model;
+                break;
+            case ("mistral", _):
+            case (_, "mistral"):
+                env["CLAUDE_CODE_USE_MISTRAL"] = "1";
+                env["MISTRAL_BASE_URL"] = agent.BaseUrl;
+                env["MISTRAL_MODEL"] = agent.Model;
+                break;
+            case ("github", _):
+            case (_, "github"):
+                env["CLAUDE_CODE_USE_GITHUB"] = "1";
+                env["OPENAI_BASE_URL"] = agent.BaseUrl;
+                env["OPENAI_MODEL"] = agent.Model;
+                break;
+            case ("bedrock", _):
+            case (_, "bedrock"):
+                env["CLAUDE_CODE_USE_BEDROCK"] = "1";
+                env["ANTHROPIC_BEDROCK_BASE_URL"] = agent.BaseUrl;
+                env["ANTHROPIC_MODEL"] = agent.Model;
+                break;
+            case ("vertex", _):
+            case (_, "vertex"):
+                env["CLAUDE_CODE_USE_VERTEX"] = "1";
+                env["ANTHROPIC_VERTEX_BASE_URL"] = agent.BaseUrl;
+                env["ANTHROPIC_MODEL"] = agent.Model;
+                break;
+            default:
+                env["CLAUDE_CODE_USE_OPENAI"] = "1";
+                env["OPENAI_BASE_URL"] = agent.BaseUrl;
+                env["OPENAI_MODEL"] = agent.Model;
+                var apiKey = ResolveHostEnv(agent.ApiKeyEnvName);
+                if (!string.IsNullOrWhiteSpace(apiKey) &&
+                    !env.ContainsKey("OPENAI_API_KEY") &&
+                    !string.Equals(agent.ApiKeyEnvName, "OPENAI_API_KEY", StringComparison.OrdinalIgnoreCase))
+                {
+                    env["OPENAI_API_KEY"] = apiKey;
+                }
+                break;
+        }
+
+        return env;
+    }
+
+    private string GetPublicApiUrl()
+    {
+        return configuration["KANITEL_PUBLIC_API_URL"]
+            ?? Environment.GetEnvironmentVariable("KANITEL_PUBLIC_API_URL")
+            ?? "http://host.docker.internal:8080";
+    }
+
+    private string CreateWorkspacePath(string runId, string taskTitle)
+    {
+        var root = configuration["KANITEL_WORKSPACES_PATH"]
+            ?? Environment.GetEnvironmentVariable("KANITEL_WORKSPACES_PATH")
+            ?? Path.Combine(environment.ContentRootPath, "workspaces");
+        return Path.Combine(root, $"{runId}-{SanitizePathSegment(taskTitle)}");
+    }
+
+    private static string RenderCommand(string template, AgentRun run)
+    {
+        var command = string.IsNullOrWhiteSpace(template)
+            ? "npx -y @gitlawb/openclaude@latest --print \"$(cat \\\"$KANITEL_TASK_PROMPT_FILE\\\")\""
+            : template;
+
+        return command
+            .Replace("{{prompt_file}}", "$KANITEL_TASK_PROMPT_FILE", StringComparison.Ordinal)
+            .Replace("{{task_id}}", run.TaskId, StringComparison.Ordinal)
+            .Replace("{{run_id}}", run.Id, StringComparison.Ordinal);
+    }
+
+    private static string BuildPrompt(
+        Project project,
+        AgentProfile agent,
+        TaskCard task,
+        IReadOnlyList<TaskComment> comments,
+        IReadOnlyList<BoardColumn> columns,
+        IReadOnlyList<RepositoryLink> repositories)
+    {
+        var prompt = new StringBuilder();
+        prompt.AppendLine(agent.SystemPrompt);
+        prompt.AppendLine();
+        prompt.AppendLine("# Kanitel Task");
+        prompt.AppendLine($"Project: {project.Name}");
+        prompt.AppendLine($"Task: {task.Title}");
+        prompt.AppendLine($"Priority: {task.Priority}");
+        prompt.AppendLine();
+        prompt.AppendLine(task.Description);
+        prompt.AppendLine();
+        prompt.AppendLine("## Linked repositories");
+        if (repositories.Count == 0)
+        {
+            prompt.AppendLine("- No repositories are linked.");
+        }
+        else
+        {
+            foreach (var repo in repositories)
+            {
+                var folder = SanitizePathSegment(string.IsNullOrWhiteSpace(repo.Name) ? repo.Id : repo.Name);
+                prompt.AppendLine($"- {repo.Name}: {repo.Url} -> /workspace/repos/{folder}");
+            }
+        }
+
+        prompt.AppendLine();
+        prompt.AppendLine("## Board columns");
+        prompt.AppendLine("Use these column names or IDs when changing task status through the Kanitel API.");
+        foreach (var column in columns.OrderBy(c => c.Position))
+        {
+            prompt.AppendLine($"- {column.Name}: {column.Id}");
+        }
+
+        prompt.AppendLine();
+        prompt.AppendLine("## Conversation");
+        foreach (var comment in comments.OrderBy(c => c.CreatedAt))
+        {
+            prompt.AppendLine($"[{comment.CreatedAt:u}] {comment.AuthorType}:{comment.AuthorId}");
+            prompt.AppendLine(comment.Body);
+            prompt.AppendLine();
+        }
+
+        prompt.AppendLine("## Kanitel API access");
+        prompt.AppendLine("You may update the board directly from this container. Use the environment variables KANITEL_API_URL, KANITEL_TASK_ID, KANITEL_AGENT_ID, and KANITEL_PROJECT_ID.");
+        prompt.AppendLine("Comment as yourself:");
+        prompt.AppendLine("curl -s -X POST \"$KANITEL_API_URL/api/agent/tasks/$KANITEL_TASK_ID/comments\" -H 'Content-Type: application/json' -d '{\"agentId\":\"'\"$KANITEL_AGENT_ID\"'\",\"body\":\"your note\"}'");
+        prompt.AppendLine("Move/change the task:");
+        prompt.AppendLine("curl -s -X PATCH \"$KANITEL_API_URL/api/agent/tasks/$KANITEL_TASK_ID\" -H 'Content-Type: application/json' -d '{\"agentId\":\"'\"$KANITEL_AGENT_ID\"'\",\"columnName\":\"Review\",\"body\":\"Moved to review.\"}'");
+        prompt.AppendLine("Assign a manager or unassign an agent by PATCHing the same endpoint with assigneeAgentId, assignmentRole=\"manager\", or unassignAgent=true.");
+        prompt.AppendLine();
+        prompt.AppendLine("## Expected outcome");
+        prompt.AppendLine("Work inside /workspace. If you change repositories, leave clear notes in your final response. Keep the response concise; Kanitel will attach it as an agent comment.");
+        return prompt.ToString();
+    }
+
+    private bool IsMockRunner()
+    {
+        return string.Equals(configuration["KANITEL_AGENT_RUNNER"], "mock", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(Environment.GetEnvironmentVariable("KANITEL_AGENT_RUNNER"), "mock", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private int ReadInt(string key, int fallback)
+    {
+        var value = configuration[key] ?? Environment.GetEnvironmentVariable(key);
+        return int.TryParse(value, out var parsed) && parsed > 0 ? parsed : fallback;
+    }
+
+    private bool ReadBool(string key, bool fallback)
+    {
+        var value = configuration[key] ?? Environment.GetEnvironmentVariable(key);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return fallback;
+        }
+
+        return value.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("yes", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? ResolveHostEnv(string envName)
+    {
+        return string.IsNullOrWhiteSpace(envName)
+            ? null
+            : Environment.GetEnvironmentVariable(envName);
+    }
+
+    private static readonly string[] KnownProviderEnvNames =
+    [
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENAI_AUTH_HEADER",
+        "OPENAI_AUTH_SCHEME",
+        "OPENAI_AUTH_HEADER_VALUE",
+        "CODEX_API_KEY",
+        "CODEX_ACCOUNT_ID",
+        "CHATGPT_ACCOUNT_ID",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "GEMINI_ACCESS_TOKEN",
+        "GITHUB_TOKEN",
+        "MISTRAL_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "OPENROUTER_API_KEY",
+        "GROQ_API_KEY",
+        "TOGETHER_API_KEY",
+        "NVIDIA_API_KEY",
+        "MINIMAX_API_KEY",
+        "MOONSHOT_API_KEY",
+        "KIMI_API_KEY",
+        "XAI_API_KEY",
+        "HICAP_API_KEY",
+        "DASHSCOPE_API_KEY",
+        "AZURE_OPENAI_API_KEY",
+        "BNKR_API_KEY",
+        "AWS_BEARER_TOKEN_BEDROCK",
+        "GOOGLE_APPLICATION_CREDENTIALS"
+    ];
+
+    private static async Task<ProcessResult> RunProcessAsync(
+        string fileName,
+        IReadOnlyList<string> args,
+        string workingDirectory,
+        Dictionary<string, string>? environment,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(timeout);
+
+        var psi = new ProcessStartInfo(fileName)
+        {
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+
+        foreach (var arg in args)
+        {
+            psi.ArgumentList.Add(arg);
+        }
+
+        if (environment is not null)
+        {
+            foreach (var pair in environment)
+            {
+                psi.Environment[pair.Key] = pair.Value;
+            }
+        }
+
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException($"Could not start {fileName}.");
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
+        var stderrTask = process.StandardError.ReadToEndAsync(timeoutCts.Token);
+
+        try
+        {
+            await process.WaitForExitAsync(timeoutCts.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            TryKill(process);
+            return new ProcessResult(-1, $"Process timed out after {timeout.TotalMinutes:n0} minutes.");
+        }
+
+        var output = await stdoutTask;
+        var error = await stderrTask;
+        var combined = string.Join(Environment.NewLine, new[] { output, error }.Where(s => !string.IsNullOrWhiteSpace(s)));
+        return new ProcessResult(process.ExitCode, TrimLog(combined));
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch
+        {
+            // Best effort cleanup; the scheduler will store the timeout result.
+        }
+    }
+
+    private static string SanitizePathSegment(string value)
+    {
+        var normalized = Regex.Replace(value.ToLowerInvariant(), "[^a-z0-9._-]+", "-").Trim('-');
+        return string.IsNullOrWhiteSpace(normalized) ? "workspace" : normalized[..Math.Min(normalized.Length, 64)];
+    }
+
+    private static string TrimLog(string value)
+    {
+        const int maxLength = 24_000;
+        if (value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        return value[^maxLength..];
+    }
+
+    private sealed record ProcessResult(int ExitCode, string Log);
+}
