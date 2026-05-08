@@ -542,6 +542,85 @@ textarea:focus {
   min-width: 0;
 }
 
+.assignee-picker,
+.avatar-field {
+  display: grid;
+  gap: 8px;
+}
+
+.avatar-field {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: end;
+  margin-bottom: 10px;
+}
+
+.avatar-field label {
+  margin-bottom: 0;
+}
+
+.avatar-field > .avatar {
+  width: 42px;
+  height: 42px;
+  min-width: 42px;
+  align-self: end;
+}
+
+.avatar-upload-button {
+  align-self: end;
+  position: relative;
+  overflow: hidden;
+}
+
+.avatar-upload-button input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.identity-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  color: var(--text);
+  padding: 4px 8px 4px 4px;
+}
+
+.identity-badge.empty {
+  min-height: 34px;
+  padding-inline: 10px;
+  color: var(--muted);
+}
+
+.identity-badge span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.identity-badge strong,
+.identity-badge em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.identity-badge strong {
+  font-size: 12px;
+}
+
+.identity-badge em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
 .inline-form,
 .stack-form,
 .agent-form {
@@ -1176,6 +1255,7 @@ label {
   }
 
   .form-grid.two,
+  .avatar-field,
   .settings-row,
   .participant-row,
   .participant-form,

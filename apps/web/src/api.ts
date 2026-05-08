@@ -71,3 +71,22 @@ export async function deleteJson(url: string): Promise<void> {
     })
   )
 }
+
+export async function uploadAvatarFile(file: File): Promise<{ url: string }> {
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const headers: Record<string, string> = {}
+  const token = readAuthToken()
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+
+  return readJson<{ url: string }>(
+    await fetch('/api/uploads/avatar', {
+      method: 'POST',
+      headers,
+      body: formData
+    })
+  )
+}

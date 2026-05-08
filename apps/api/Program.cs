@@ -75,6 +75,7 @@ app.MapProjectEndpoints();
 app.MapParticipantEndpoints();
 app.MapRepositoryEndpoints();
 app.MapAgentEndpoints();
+app.MapUploadEndpoints();
 app.MapTaskEndpoints();
 
 var indexPath = Path.Combine(app.Environment.WebRootPath ?? "", "index.html");

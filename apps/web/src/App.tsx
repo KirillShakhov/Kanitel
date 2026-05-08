@@ -17,13 +17,14 @@ import {
   Settings,
   Sun,
   Trash2,
+  Upload,
   UserPlus,
   Users,
   X
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { deleteJson, loadBootstrap, patchJson, postJson, readAuthToken, storeAuthToken } from './api'
+import { deleteJson, loadBootstrap, patchJson, postJson, readAuthToken, storeAuthToken, uploadAvatarFile } from './api'
 import type {
   AgentProfile,
   AgentTemplate,
@@ -127,6 +128,7 @@ const labels = {
     passwordsDoNotMatch: 'Пароли не совпадают',
     passwordChangeFieldsRequired: 'Для смены пароля заполните текущий пароль, новый пароль и повтор нового пароля',
     avatarUrl: 'Аватар URL',
+    uploadAvatar: 'Загрузить файл',
     navBoard: 'Доска',
     navProjects: 'Проекты',
     navSettings: 'Настройки',
@@ -232,6 +234,7 @@ const labels = {
     passwordsDoNotMatch: 'Passwords do not match',
     passwordChangeFieldsRequired: 'To change the password, fill current password, new password, and repeat new password',
     avatarUrl: 'Avatar URL',
+    uploadAvatar: 'Upload file',
     navBoard: 'Board',
     navProjects: 'Projects',
     navSettings: 'Settings',
@@ -581,6 +584,22 @@ export default function App() {
     }
   }
 
+  async function uploadAvatar(file?: File) {
+    if (!file) return ''
+
+    setBusy(true)
+    setError('')
+    try {
+      const result = await uploadAvatarFile(file)
+      return result.url
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      return ''
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function authenticate() {
     setBusy(true)
     setError('')
@@ -756,6 +775,12 @@ export default function App() {
         error={error}
         onModeChange={setAuthMode}
         onDraftChange={setAuthDraft}
+        onAvatarFile={async (file) => {
+          const avatarUrl = await uploadAvatar(file)
+          if (avatarUrl) {
+            setAuthDraft(draft => ({ ...draft, avatarUrl }))
+          }
+        }}
         onSubmit={authenticate}
         onTheme={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
         onLocale={() => setLocale(locale === 'ru' ? 'en' : 'ru')}
@@ -927,6 +952,12 @@ export default function App() {
           onThemeChange={setTheme}
           onLocaleChange={setLocale}
           onProfileDraftChange={setProfileDraft}
+          onProfileAvatarFile={async (file) => {
+            const avatarUrl = await uploadAvatar(file)
+            if (avatarUrl) {
+              setProfileDraft(draft => ({ ...draft, avatarUrl }))
+            }
+          }}
           onSaveProfile={() => mutate(updateProfile())}
           onSelectAgent={setSelectedAgentId}
           onNewAgent={() => {
@@ -934,6 +965,12 @@ export default function App() {
             setAgentDraft(initialAgentDraft(bootstrap.providerPresets[0], bootstrap.agentTemplates[0]))
           }}
           onAgentDraftChange={setAgentDraft}
+          onAgentAvatarFile={async (file) => {
+            const avatarUrl = await uploadAvatar(file)
+            if (avatarUrl) {
+              setAgentDraft(draft => ({ ...draft, avatarUrl }))
+            }
+          }}
           onPreset={applyPresetToDraft}
           onTemplate={applyTemplateToDraft}
           onCreateAgent={createAgent}
@@ -977,6 +1014,7 @@ function AuthScreen({
   error,
   onModeChange,
   onDraftChange,
+  onAvatarFile,
   onSubmit,
   onTheme,
   onLocale
@@ -990,6 +1028,7 @@ function AuthScreen({
   error: string
   onModeChange: (mode: 'login' | 'register') => void
   onDraftChange: (draft: AuthDraft) => void
+  onAvatarFile: (file?: File) => void
   onSubmit: () => void
   onTheme: () => void
   onLocale: () => void
@@ -1022,10 +1061,13 @@ function AuthScreen({
                 {t.displayName}
                 <input value={draft.displayName} onChange={event => onDraftChange({ ...draft, displayName: event.target.value })} />
               </label>
-              <label>
-                {t.avatarUrl}
-                <input value={draft.avatarUrl} onChange={event => onDraftChange({ ...draft, avatarUrl: event.target.value })} placeholder="https://..." />
-              </label>
+              <AvatarField
+                labels={t}
+                name={draft.displayName || t.displayName}
+                value={draft.avatarUrl}
+                onChange={avatarUrl => onDraftChange({ ...draft, avatarUrl })}
+                onFile={onAvatarFile}
+              />
             </>
           )}
           <label>
@@ -1116,6 +1158,10 @@ function BoardPage({
                 <option key={participant.key} value={participant.key}>{participant.name}</option>
               ))}
             </select>
+            <ParticipantBadge
+              participant={participants.find(participant => participant.key === assigneeFilter)}
+              fallback={assigneeFilter === 'unassigned' ? t.noAssignee : t.allAssignees}
+            />
           </label>
           <span>{tasks.length}</span>
         </div>
@@ -1212,12 +1258,12 @@ function KanbanColumn({
         <div className="inline-form">
           <input value={taskDraft.title} onChange={event => onDraftChange({ ...taskDraft, title: event.target.value })} placeholder={t.title} />
           <textarea value={taskDraft.description} onChange={event => onDraftChange({ ...taskDraft, description: event.target.value })} placeholder={t.description} rows={3} />
-          <select value={taskDraft.assigneeId} onChange={event => onDraftChange({ ...taskDraft, assigneeId: event.target.value })}>
-            <option value="">{t.noAssignee}</option>
-            {participants.map(participant => (
-              <option key={participant.key} value={participant.key}>{participant.name}</option>
-            ))}
-          </select>
+          <AssigneePicker
+            labels={t}
+            value={taskDraft.assigneeId}
+            participants={participants}
+            onChange={assigneeId => onDraftChange({ ...taskDraft, assigneeId })}
+          />
           <button className="primary-button" onClick={onCreateTask} disabled={busy}>
             <Plus size={16} />
             {t.create}
@@ -1375,12 +1421,12 @@ function TaskModal({
             </label>
             <label>
               {t.assignee}
-              <select value={draft.assigneeId} onChange={event => onDraftChange({ ...draft, assigneeId: event.target.value })}>
-                <option value="">{t.noAssignee}</option>
-                {participants.map(participant => (
-                  <option key={participant.key} value={participant.key}>{participant.name}</option>
-                ))}
-              </select>
+              <AssigneePicker
+                labels={t}
+                value={draft.assigneeId}
+                participants={participants}
+                onChange={assigneeId => onDraftChange({ ...draft, assigneeId })}
+              />
             </label>
             <div className="task-author">
               <span>{t.author}</span>
@@ -1558,6 +1604,17 @@ function ProjectsPage({
                           <option key={person.id} value={person.id}>{person.displayName}</option>
                         ))}
                       </select>
+                      {(() => {
+                        const person = state.people.find(item => item.id === participantDraft.personId)
+                        return (
+                          <IdentityBadge
+                            name={person?.displayName}
+                            avatarUrl={person?.avatarUrl}
+                            detail={person?.email}
+                            fallback={t.selectPerson}
+                          />
+                        )
+                      })()}
                     </label>
                   ) : (
                     <label className="participant-wide">
@@ -1568,6 +1625,17 @@ function ProjectsPage({
                           <option key={agent.id} value={agent.id}>{agent.name}</option>
                         ))}
                       </select>
+                      {(() => {
+                        const agent = unlinkedAgents.find(item => item.id === participantDraft.agentId)
+                        return (
+                          <IdentityBadge
+                            name={agent?.name}
+                            avatarUrl={agent?.avatarUrl}
+                            detail={agent?.providerPresetId}
+                            fallback={t.selectAgent}
+                          />
+                        )
+                      })()}
                     </label>
                   )}
                   <button className="secondary-button" onClick={onAddParticipant} disabled={busy}>
@@ -1629,10 +1697,12 @@ function SettingsPage({
   onThemeChange,
   onLocaleChange,
   onProfileDraftChange,
+  onProfileAvatarFile,
   onSaveProfile,
   onSelectAgent,
   onNewAgent,
   onAgentDraftChange,
+  onAgentAvatarFile,
   onPreset,
   onTemplate,
   onCreateAgent,
@@ -1653,10 +1723,12 @@ function SettingsPage({
   onThemeChange: (theme: Theme) => void
   onLocaleChange: (locale: Locale) => void
   onProfileDraftChange: (draft: ProfileDraft) => void
+  onProfileAvatarFile: (file?: File) => void
   onSaveProfile: () => void
   onSelectAgent: (id: string) => void
   onNewAgent: () => void
   onAgentDraftChange: (draft: AgentDraft) => void
+  onAgentAvatarFile: (file?: File) => void
   onPreset: (presetId: string) => void
   onTemplate: (templateId: string) => void
   onCreateAgent: () => void
@@ -1677,10 +1749,13 @@ function SettingsPage({
               <input value={profileDraft.email} onChange={event => onProfileDraftChange({ ...profileDraft, email: event.target.value })} />
             </label>
           </div>
-          <label>
-            {t.avatarUrl}
-            <input value={profileDraft.avatarUrl} onChange={event => onProfileDraftChange({ ...profileDraft, avatarUrl: event.target.value })} />
-          </label>
+          <AvatarField
+            labels={t}
+            name={profileDraft.displayName || t.profile}
+            value={profileDraft.avatarUrl}
+            onChange={avatarUrl => onProfileDraftChange({ ...profileDraft, avatarUrl })}
+            onFile={onProfileAvatarFile}
+          />
           <div className="form-grid two">
             <label>
               {t.currentPassword}
@@ -1749,6 +1824,7 @@ function SettingsPage({
               presets={presets}
               templates={templates}
               onChange={onAgentDraftChange}
+              onAvatarFile={onAgentAvatarFile}
               onPreset={onPreset}
               onTemplate={onTemplate}
             />
@@ -1784,6 +1860,7 @@ function AgentForm({
   presets,
   templates,
   onChange,
+  onAvatarFile,
   onPreset,
   onTemplate
 }: {
@@ -1792,6 +1869,7 @@ function AgentForm({
   presets: ProviderPreset[]
   templates: AgentTemplate[]
   onChange: (draft: AgentDraft) => void
+  onAvatarFile: (file?: File) => void
   onPreset: (presetId: string) => void
   onTemplate: (templateId: string) => void
 }) {
@@ -1811,10 +1889,14 @@ function AgentForm({
           </select>
         </label>
       </div>
-      <label>
-        {t.avatarOrLogo}
-        <input value={draft.avatarUrl} onChange={event => onChange({ ...draft, avatarUrl: event.target.value })} placeholder="https://..." />
-      </label>
+      <AvatarField
+        labels={t}
+        label={t.avatarOrLogo}
+        name={draft.name || t.agent}
+        value={draft.avatarUrl}
+        onChange={avatarUrl => onChange({ ...draft, avatarUrl })}
+        onFile={onAvatarFile}
+      />
       <div className="form-grid two">
         <label>
           {t.provider}
@@ -1930,6 +2012,44 @@ function Panel({ title, icon, children }: { title: string; icon: ReactNode; chil
   )
 }
 
+function AvatarField({
+  labels: t,
+  label,
+  name,
+  value,
+  onChange,
+  onFile
+}: {
+  labels: Labels
+  label?: string
+  name: string
+  value: string
+  onChange: (value: string) => void
+  onFile: (file?: File) => void
+}) {
+  return (
+    <div className="avatar-field">
+      <Avatar name={name} url={value} />
+      <label>
+        {label ?? t.avatarUrl}
+        <input value={value} onChange={event => onChange(event.target.value)} placeholder="https://..." />
+      </label>
+      <label className="secondary-button avatar-upload-button">
+        <Upload size={16} />
+        {t.uploadAvatar}
+        <input
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          onChange={event => {
+            onFile(event.target.files?.[0])
+            event.currentTarget.value = ''
+          }}
+        />
+      </label>
+    </div>
+  )
+}
+
 function Avatar({ name, url }: { name: string; url?: string | null }) {
   if (url) {
     return <img className="avatar" src={url} alt="" />
@@ -1949,6 +2069,68 @@ function Avatar({ name, url }: { name: string; url?: string | null }) {
   )
 }
 
+function IdentityBadge({
+  name,
+  avatarUrl,
+  detail,
+  fallback
+}: {
+  name?: string
+  avatarUrl?: string | null
+  detail?: string
+  fallback: string
+}) {
+  if (!name) {
+    return <span className="identity-badge empty">{fallback}</span>
+  }
+
+  return (
+    <span className="identity-badge">
+      <Avatar name={name} url={avatarUrl} />
+      <span>
+        <strong>{name}</strong>
+        {detail && <em>{detail}</em>}
+      </span>
+    </span>
+  )
+}
+
+function ParticipantBadge({ participant, fallback }: { participant?: Participant; fallback: string }) {
+  return (
+    <IdentityBadge
+      name={participant?.name}
+      avatarUrl={participant?.avatarUrl}
+      detail={participant?.kind === 'agent' ? undefined : participant?.email}
+      fallback={fallback}
+    />
+  )
+}
+
+function AssigneePicker({
+  labels: t,
+  value,
+  participants,
+  onChange
+}: {
+  labels: Labels
+  value: string
+  participants: Participant[]
+  onChange: (value: string) => void
+}) {
+  const participant = participants.find(item => item.key === value)
+  return (
+    <div className="assignee-picker">
+      <select value={value} onChange={event => onChange(event.target.value)}>
+        <option value="">{t.noAssignee}</option>
+        {participants.map(item => (
+          <option key={item.key} value={item.key}>{item.name}</option>
+        ))}
+      </select>
+      <ParticipantBadge participant={participant} fallback={t.noAssignee} />
+    </div>
+  )
+}
+
 function TaskMeta({ labels: t, task, participants, runs }: { labels: Labels; task: TaskCard; participants: Participant[]; runs: Array<{ taskId: string; status: string; createdAt: string }> }) {
   const participant = participants.find(item => item.key === assigneeValue(task))
   const run = runs
@@ -1956,7 +2138,7 @@ function TaskMeta({ labels: t, task, participants, runs }: { labels: Labels; tas
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
   return (
     <span className="task-meta">
-      <span>{participant?.kind === 'agent' ? <Bot size={13} /> : <Users size={13} />} {participant?.name ?? t.noAssignee}</span>
+      <ParticipantBadge participant={participant} fallback={t.noAssignee} />
       <span>{run?.status ?? t.noRuns}</span>
     </span>
   )

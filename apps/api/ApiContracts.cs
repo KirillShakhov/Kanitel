@@ -49,6 +49,10 @@ internal sealed record ProfileUpdateResult(AuthResponse? Response, string? Error
 /// <param name="Person">Linked user profile.</param>
 public sealed record AuthResponse(string Token, Person Person);
 
+/// <summary>Uploaded avatar response.</summary>
+/// <param name="Url">Data URL that can be stored as a person or agent avatar URL.</param>
+public sealed record AvatarUploadResponse(string Url);
+
 /// <summary>Board column create/update payload.</summary>
 /// <param name="Name">Column name shown on the kanban board.</param>
 /// <param name="Color">CSS color used as the column accent.</param>
