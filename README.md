@@ -132,12 +132,18 @@ When an agent runs, Kanitel creates an isolated workspace container and passes c
 environment variables:
 
 ```dotenv
+KANITEL_DOCKER_WORKSPACE_MODE=copy
 KANITEL_API_URL=http://host.docker.internal:8080
 KANITEL_PROJECT_ID=project_...
 KANITEL_TASK_ID=task_...
 KANITEL_AGENT_ID=agent_...
 KANITEL_TASK_PROMPT_FILE=/workspace/task.md
 ```
+
+`KANITEL_DOCKER_WORKSPACE_MODE=copy` is the default because it works when Kanitel itself runs in a
+Docker container: Kanitel copies the prepared workspace into the agent container with `docker cp`,
+then copies the result back. Use `bind` only when the workspace path is visible to the Docker daemon
+on the host.
 
 Agents can report back with simple HTTP callbacks:
 

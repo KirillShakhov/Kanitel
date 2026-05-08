@@ -146,14 +146,24 @@ public sealed class DockerAgentRunner(
     {
         var command = RenderCommand(agent.CommandTemplate, run);
         var containerName = $"kanitel-agent-{run.Id}".Replace('_', '-');
-        var dockerArgs = new List<string>
+        var image = string.IsNullOrWhiteSpace(agent.ContainerImage) ? "node:22-bookworm" : agent.ContainerImage;
+        var workspaceMode = ReadString("KANITEL_DOCKER_WORKSPACE_MODE", "copy");
+        var dockerOptions = BuildDockerOptions(run, agent, containerName);
+
+        log.AppendLine($"Starting Docker container {containerName} using image {image}.");
+        log.AppendLine($"Docker workspace mode: {workspaceMode}.");
+
+        return string.Equals(workspaceMode, "bind", StringComparison.OrdinalIgnoreCase)
+            ? await RunDockerWithBindWorkspaceAsync(containerName, image, command, dockerOptions, workspace, cancellationToken)
+            : await RunDockerWithCopiedWorkspaceAsync(containerName, image, command, dockerOptions, workspace, cancellationToken);
+    }
+
+    private List<string> BuildDockerOptions(AgentRun run, AgentProfile agent, string containerName)
+    {
+        var dockerOptions = new List<string>
         {
-            "run",
-            "--rm",
             "--name",
             containerName,
-            "-v",
-            $"{workspace}:/workspace",
             "-w",
             "/workspace",
             "-e",
@@ -172,22 +182,22 @@ public sealed class DockerAgentRunner(
 
         if (ReadBool("KANITEL_DOCKER_ADD_HOST_GATEWAY", true))
         {
-            dockerArgs.Add("--add-host");
-            dockerArgs.Add("host.docker.internal:host-gateway");
+            dockerOptions.Add("--add-host");
+            dockerOptions.Add("host.docker.internal:host-gateway");
         }
 
         var agentEnvironment = BuildAgentEnvironment(agent);
         foreach (var (key, value) in agentEnvironment)
         {
-            dockerArgs.Add("-e");
-            dockerArgs.Add($"{key}={value}");
+            dockerOptions.Add("-e");
+            dockerOptions.Add($"{key}={value}");
         }
 
         if (!string.IsNullOrWhiteSpace(agent.ApiKeyEnvName) &&
             !agent.Environment.ContainsKey(agent.ApiKeyEnvName))
         {
-            dockerArgs.Add("-e");
-            dockerArgs.Add(agent.ApiKeyEnvName);
+            dockerOptions.Add("-e");
+            dockerOptions.Add(agent.ApiKeyEnvName);
         }
 
         foreach (var envName in KnownProviderEnvNames)
@@ -196,17 +206,35 @@ public sealed class DockerAgentRunner(
                 !string.Equals(envName, agent.ApiKeyEnvName, StringComparison.OrdinalIgnoreCase) &&
                 !agentEnvironment.ContainsKey(envName))
             {
-                dockerArgs.Add("-e");
-                dockerArgs.Add(envName);
+                dockerOptions.Add("-e");
+                dockerOptions.Add(envName);
             }
         }
 
-        dockerArgs.Add(string.IsNullOrWhiteSpace(agent.ContainerImage) ? "node:22-bookworm" : agent.ContainerImage);
+        return dockerOptions;
+    }
+
+    private async Task<ProcessResult> RunDockerWithBindWorkspaceAsync(
+        string containerName,
+        string image,
+        string command,
+        IReadOnlyList<string> dockerOptions,
+        string workspace,
+        CancellationToken cancellationToken)
+    {
+        var dockerArgs = new List<string>
+        {
+            "run",
+            "--rm",
+            "-v",
+            $"{workspace}:/workspace"
+        };
+        dockerArgs.AddRange(dockerOptions);
+        dockerArgs.Add(image);
         dockerArgs.Add("/bin/sh");
         dockerArgs.Add("-lc");
         dockerArgs.Add(command);
 
-        log.AppendLine($"Starting Docker container {containerName} using image {agent.ContainerImage}.");
         return await RunProcessAsync(
             "docker",
             dockerArgs,
@@ -214,6 +242,75 @@ public sealed class DockerAgentRunner(
             null,
             TimeSpan.FromMinutes(ReadInt("KANITEL_AGENT_TIMEOUT_MINUTES", 30)),
             cancellationToken);
+    }
+
+    private async Task<ProcessResult> RunDockerWithCopiedWorkspaceAsync(
+        string containerName,
+        string image,
+        string command,
+        IReadOnlyList<string> dockerOptions,
+        string workspace,
+        CancellationToken cancellationToken)
+    {
+        await TryRemoveContainerAsync(containerName, workspace, cancellationToken);
+
+        var timeout = TimeSpan.FromMinutes(ReadInt("KANITEL_AGENT_TIMEOUT_MINUTES", 30));
+        var createArgs = new List<string> { "create" };
+        createArgs.AddRange(dockerOptions);
+        createArgs.Add(image);
+        createArgs.Add("/bin/sh");
+        createArgs.Add("-lc");
+        createArgs.Add(command);
+
+        try
+        {
+            var create = await RunProcessAsync("docker", createArgs, workspace, null, TimeSpan.FromMinutes(2), cancellationToken);
+            if (create.ExitCode != 0)
+            {
+                return create;
+            }
+
+            var copyIn = await RunProcessAsync(
+                "docker",
+                ["cp", WorkspaceCopySource(workspace), $"{containerName}:/workspace"],
+                workspace,
+                null,
+                TimeSpan.FromMinutes(10),
+                cancellationToken);
+            if (copyIn.ExitCode != 0)
+            {
+                return copyIn;
+            }
+
+            var start = await RunProcessAsync("docker", ["start", "-a", containerName], workspace, null, timeout, cancellationToken);
+            var exitCode = await InspectContainerExitCodeAsync(containerName, start.ExitCode, workspace, cancellationToken);
+            var copyOut = await RunProcessAsync(
+                "docker",
+                ["cp", $"{containerName}:/workspace/.", workspace],
+                workspace,
+                null,
+                TimeSpan.FromMinutes(10),
+                cancellationToken);
+
+            var combinedLog = new StringBuilder();
+            if (!string.IsNullOrWhiteSpace(start.Log))
+            {
+                combinedLog.AppendLine(start.Log);
+            }
+
+            if (copyOut.ExitCode != 0)
+            {
+                combinedLog.AppendLine("Failed to copy workspace back from the agent container:");
+                combinedLog.AppendLine(copyOut.Log);
+                return new ProcessResult(copyOut.ExitCode, TrimLog(combinedLog.ToString()));
+            }
+
+            return new ProcessResult(exitCode, TrimLog(combinedLog.ToString()));
+        }
+        finally
+        {
+            await TryRemoveContainerAsync(containerName, workspace, CancellationToken.None);
+        }
     }
 
     private Dictionary<string, string> BuildAgentEnvironment(AgentProfile agent)
@@ -404,6 +501,12 @@ public sealed class DockerAgentRunner(
             || string.Equals(Environment.GetEnvironmentVariable("KANITEL_AGENT_RUNNER"), "mock", StringComparison.OrdinalIgnoreCase);
     }
 
+    private string ReadString(string key, string fallback)
+    {
+        var value = configuration[key] ?? Environment.GetEnvironmentVariable(key);
+        return string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+    }
+
     private int ReadInt(string key, int fallback)
     {
         var value = configuration[key] ?? Environment.GetEnvironmentVariable(key);
@@ -433,6 +536,66 @@ public sealed class DockerAgentRunner(
     private static string? ResolveAgentApiKey(AgentProfile agent)
     {
         return ResolveHostEnv(agent.ApiKeySourceEnvName) ?? ResolveHostEnv(agent.ApiKeyEnvName);
+    }
+
+    private async Task<int> InspectContainerExitCodeAsync(
+        string containerName,
+        int fallback,
+        string workspace,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await RunProcessAsync(
+                "docker",
+                ["inspect", "--format", "{{.State.ExitCode}}", containerName],
+                workspace,
+                null,
+                TimeSpan.FromSeconds(30),
+                cancellationToken);
+
+            return result.ExitCode == 0 && int.TryParse(result.Log.Trim(), out var exitCode)
+                ? exitCode
+                : fallback;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return fallback;
+        }
+    }
+
+    private async Task TryRemoveContainerAsync(
+        string containerName,
+        string workspace,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await RunProcessAsync(
+                "docker",
+                ["rm", "-f", containerName],
+                workspace,
+                null,
+                TimeSpan.FromSeconds(30),
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            // Best effort cleanup for a run-specific container name.
+        }
+    }
+
+    private static string WorkspaceCopySource(string workspace)
+    {
+        return Path.Combine(workspace, ".");
     }
 
     private static readonly string[] KnownProviderEnvNames =
