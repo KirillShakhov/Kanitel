@@ -135,6 +135,7 @@ public sealed class JsonDataStore
             agent.ToolTags ??= [];
             agent.AvatarUrl ??= "";
             agent.ApiKeySourceEnvName ??= "";
+            agent.CommandTemplate = AgentCommandDefaults.Normalize(agent.CommandTemplate);
         }
 
         foreach (var person in state.People)

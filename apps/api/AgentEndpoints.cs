@@ -26,9 +26,7 @@ public static class AgentEndpoints
                     Model = string.IsNullOrWhiteSpace(request.Model) ? preset.DefaultModel : request.Model.Trim(),
                     ApiKeyEnvName = string.IsNullOrWhiteSpace(request.ApiKeyEnvName) ? preset.ApiKeyEnvName : request.ApiKeyEnvName.Trim(),
                     ContainerImage = string.IsNullOrWhiteSpace(request.ContainerImage) ? "node:22-bookworm" : request.ContainerImage.Trim(),
-                    CommandTemplate = string.IsNullOrWhiteSpace(request.CommandTemplate)
-                        ? "npx -y @gitlawb/openclaude@latest --print \"$(cat \\\"$KANITEL_TASK_PROMPT_FILE\\\")\""
-                        : request.CommandTemplate.Trim(),
+                    CommandTemplate = AgentCommandDefaults.Normalize(request.CommandTemplate),
                     SystemPrompt = string.IsNullOrWhiteSpace(request.SystemPrompt) ? template.SystemPrompt : request.SystemPrompt.Trim(),
                     Enabled = request.Enabled ?? true,
                     ToolTags = template.ToolTags.ToList(),
@@ -79,7 +77,7 @@ public static class AgentEndpoints
                 if (!string.IsNullOrWhiteSpace(request.Model)) agent.Model = request.Model.Trim();
                 if (request.ApiKeyEnvName is not null) agent.ApiKeyEnvName = request.ApiKeyEnvName.Trim();
                 if (!string.IsNullOrWhiteSpace(request.ContainerImage)) agent.ContainerImage = request.ContainerImage.Trim();
-                if (!string.IsNullOrWhiteSpace(request.CommandTemplate)) agent.CommandTemplate = request.CommandTemplate.Trim();
+                if (!string.IsNullOrWhiteSpace(request.CommandTemplate)) agent.CommandTemplate = AgentCommandDefaults.Normalize(request.CommandTemplate);
                 if (request.SystemPrompt is not null) agent.SystemPrompt = request.SystemPrompt.Trim();
                 if (request.Enabled.HasValue) agent.Enabled = request.Enabled.Value;
                 if (request.Environment is not null) agent.Environment = MergeEnvironment(agent.Environment, request.Environment);

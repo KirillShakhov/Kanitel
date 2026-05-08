@@ -4,7 +4,6 @@ internal static class EnvAgentCatalog
 {
     private const int MaxAgentCount = 100;
     private const int MaxEnvironmentRows = 100;
-    private const string DefaultCommandTemplate = "npx -y @gitlawb/openclaude@latest --print \"$(cat \\\"$KANITEL_TASK_PROMPT_FILE\\\")\"";
 
     public static List<AgentProfile> Read(IConfiguration configuration)
     {
@@ -49,7 +48,7 @@ internal static class EnvAgentCatalog
                 ApiKeyEnvName = apiKeyEnvName,
                 ApiKeySourceEnvName = apiKeySourceEnvName,
                 ContainerImage = Read(configuration, $"{prefix}CONTAINER_IMAGE") ?? "node:22-bookworm",
-                CommandTemplate = Read(configuration, $"{prefix}COMMAND") ?? DefaultCommandTemplate,
+                CommandTemplate = AgentCommandDefaults.Normalize(Read(configuration, $"{prefix}COMMAND")),
                 SystemPrompt = Read(configuration, $"{prefix}SYSTEM_PROMPT") ?? template.SystemPrompt,
                 Enabled = ReadBool(configuration, $"{prefix}ENABLED", true),
                 ToolTags = template.ToolTags.ToList(),

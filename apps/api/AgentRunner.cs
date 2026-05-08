@@ -305,14 +305,12 @@ public sealed class DockerAgentRunner(
 
     private static string RenderCommand(string template, AgentRun run)
     {
-        var command = string.IsNullOrWhiteSpace(template)
-            ? "npx -y @gitlawb/openclaude@latest --print \"$(cat \\\"$KANITEL_TASK_PROMPT_FILE\\\")\""
-            : template;
+        var command = AgentCommandDefaults.Normalize(template);
 
-        return command
+        return AgentCommandDefaults.Normalize(command
             .Replace("{{prompt_file}}", "$KANITEL_TASK_PROMPT_FILE", StringComparison.Ordinal)
             .Replace("{{task_id}}", run.TaskId, StringComparison.Ordinal)
-            .Replace("{{run_id}}", run.Id, StringComparison.Ordinal);
+            .Replace("{{run_id}}", run.Id, StringComparison.Ordinal));
     }
 
     private static string BuildPrompt(
