@@ -151,6 +151,8 @@ const labels = {
     addColumn: 'Добавить колонку',
     columnName: 'Новая колонка',
     deleteColumn: 'Удалить колонку',
+    deleteProject: 'Удалить проект',
+    confirmDeleteProject: (name: string) => `Удалить проект «${name}»? Все задачи, комментарии, история, участники и репозитории проекта будут удалены.`,
     addParticipant: 'Добавить участника',
     participantType: 'Тип участника',
     person: 'Человек',
@@ -257,6 +259,8 @@ const labels = {
     addColumn: 'Add column',
     columnName: 'New column',
     deleteColumn: 'Delete column',
+    deleteProject: 'Delete project',
+    confirmDeleteProject: (name: string) => `Delete project "${name}"? All project tasks, comments, history, participants, and repositories will be removed.`,
     addParticipant: 'Add participant',
     participantType: 'Participant type',
     person: 'Person',
@@ -667,6 +671,20 @@ export default function App() {
     await mutate(patchJson<Project>(`/api/projects/${activeProject.id}`, projectEditDraft))
   }
 
+  async function deleteProject() {
+    if (!activeProject) return
+    if (!window.confirm(t.confirmDeleteProject(activeProject.name))) return
+
+    const deletedProjectId = activeProject.id
+    await mutate(deleteJson(`/api/projects/${deletedProjectId}`))
+    setSelectedTaskId('')
+    setNewTaskColumnId('')
+    setDraggedTaskId('')
+    setDragOverColumnId('')
+    setProjectEditDraft({ name: '', description: '' })
+    setActiveProjectId(current => current === deletedProjectId ? '' : current)
+  }
+
   async function createTask(columnId: string) {
     if (!activeProject || !taskDraft.title.trim()) return
     const assignment = splitAssignee(taskDraft.assigneeId)
@@ -916,6 +934,7 @@ export default function App() {
           onProjectEditDraftChange={setProjectEditDraft}
           onCreateProject={createProject}
           onSaveProject={saveProject}
+          onDeleteProject={deleteProject}
           onColumnDraftChange={setColumnDraft}
           onAddColumn={() => {
             if (!activeProject) return
@@ -1480,6 +1499,7 @@ function ProjectsPage({
   onProjectEditDraftChange,
   onCreateProject,
   onSaveProject,
+  onDeleteProject,
   onColumnDraftChange,
   onAddColumn,
   onDeleteColumn,
@@ -1507,6 +1527,7 @@ function ProjectsPage({
   onProjectEditDraftChange: (draft: { name: string; description: string }) => void
   onCreateProject: () => void
   onSaveProject: () => void
+  onDeleteProject: () => void
   onColumnDraftChange: (draft: { name: string; color: string }) => void
   onAddColumn: () => void
   onDeleteColumn: (columnId: string) => void
@@ -1553,6 +1574,10 @@ function ProjectsPage({
               <input value={projectEditDraft.description} onChange={event => onProjectEditDraftChange({ ...projectEditDraft, description: event.target.value })} placeholder={t.description} />
             </div>
             <div className="button-row">
+              <button className="danger-button" onClick={onDeleteProject} disabled={busy}>
+                <Trash2 size={16} />
+                {t.deleteProject}
+              </button>
               <button className="primary-button" onClick={onSaveProject} disabled={busy}>
                 <Save size={16} />
                 {t.save}

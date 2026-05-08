@@ -24,6 +24,7 @@ public static class SystemEndpoints
                 new { method = "GET", path = "/api/auth/me", purpose = "Read the current user profile from the bearer token." },
                 new { method = "PATCH", path = "/api/auth/me", purpose = "Update the current user profile; password changes require the current password and matching confirmation." },
                 new { method = "POST", path = "/api/projects", purpose = "Create a project with default columns." },
+                new { method = "DELETE", path = "/api/projects/{projectId}", purpose = "Delete a project and all project-owned board data." },
                 new { method = "POST", path = "/api/projects/{projectId}/tasks", purpose = "Create a task card." },
                 new { method = "PATCH", path = "/api/tasks/{taskId}", purpose = "Update a task card, assignment, or column." },
                 new { method = "POST", path = "/api/tasks/{taskId}/comments", purpose = "Add a human/system comment." },

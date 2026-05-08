@@ -80,6 +80,40 @@ public static class ProjectEndpoints
             .WithSummary("Update project")
             .WithDescription("Updates a project's name and description. Columns, repositories, people, and agents are intentionally managed through separate endpoints.");
 
+        app.MapDelete("/api/projects/{projectId}", async (JsonDataStore store, string projectId, CancellationToken cancellationToken) =>
+        {
+            var deleted = await store.MutateAsync(state =>
+            {
+                var project = state.Projects.FirstOrDefault(p => p.Id == projectId);
+                if (project is null)
+                {
+                    return false;
+                }
+
+                var taskIds = state.Tasks
+                    .Where(task => task.ProjectId == projectId)
+                    .Select(task => task.Id)
+                    .ToHashSet(StringComparer.Ordinal);
+
+                state.Projects.Remove(project);
+                state.Columns.RemoveAll(column => column.ProjectId == projectId);
+                state.Members.RemoveAll(member => member.ProjectId == projectId);
+                state.Repositories.RemoveAll(repository => repository.ProjectId == projectId);
+                state.ProjectAgents.RemoveAll(agent => agent.ProjectId == projectId);
+                state.Tasks.RemoveAll(task => task.ProjectId == projectId);
+                state.Comments.RemoveAll(comment => taskIds.Contains(comment.TaskId));
+                state.History.RemoveAll(entry => taskIds.Contains(entry.TaskId));
+                state.Runs.RemoveAll(run => run.ProjectId == projectId || taskIds.Contains(run.TaskId));
+
+                return true;
+            }, cancellationToken);
+
+            return deleted ? Results.NoContent() : Results.NotFound();
+        })
+            .WithTags("Projects")
+            .WithSummary("Delete project")
+            .WithDescription("Deletes a project and all board data owned by it, including columns, tasks, comments, history entries, participants, repository links, project agents, and agent runs.");
+
         app.MapPost("/api/projects/{projectId}/columns", async (JsonDataStore store, string projectId, ColumnRequest request, CancellationToken cancellationToken) =>
         {
             var created = await store.MutateAsync<object?>(state =>
