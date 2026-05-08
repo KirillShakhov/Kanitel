@@ -278,6 +278,13 @@ textarea:focus {
   min-height: 30px;
 }
 
+.modal-close-button {
+  height: 38px;
+  min-height: 38px;
+  flex: 0 0 38px;
+  align-self: flex-start;
+}
+
 .language-button {
   font-weight: 800;
   min-width: 66px;

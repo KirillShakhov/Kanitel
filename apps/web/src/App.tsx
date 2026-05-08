@@ -1235,7 +1235,7 @@ function TaskModal({
             <span>{t.taskDetails}</span>
             <h2>{task.title}</h2>
           </div>
-          <button className="icon-button" onClick={onClose}>
+          <button className="icon-button modal-close-button" onClick={onClose}>
             <X size={18} />
           </button>
         </header>
