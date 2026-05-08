@@ -69,7 +69,7 @@ public sealed class DockerAgentRunner(
         {
             var dockerResult = await RunDockerAsync(run, agent, workspace, log, cancellationToken);
             log.AppendLine($"Agent container exit code: {dockerResult.ExitCode}.");
-            log.AppendLine(dockerResult.Log);
+            log.AppendLine(AnnotateAgentRunLog(agent, dockerResult.Log));
             return new AgentRunResult(
                 dockerResult.ExitCode == 0,
                 workspace,
@@ -393,6 +393,18 @@ public sealed class DockerAgentRunner(
                 env["CLAUDE_CODE_USE_GITHUB"] = "1";
                 env["OPENAI_BASE_URL"] = agent.BaseUrl;
                 env["OPENAI_MODEL"] = agent.Model;
+                var githubToken = IsGithubModelsAgent(agent)
+                    ? FirstNonEmpty(env, "GITHUB_TOKEN", "GH_TOKEN", "OPENAI_API_KEY")
+                    : FirstNonEmpty(env, "GITHUB_TOKEN", "GH_TOKEN");
+                if (!string.IsNullOrWhiteSpace(githubToken))
+                {
+                    if (IsGithubModelsAgent(agent))
+                    {
+                        env["GITHUB_TOKEN"] = githubToken;
+                    }
+
+                    env["OPENAI_API_KEY"] = githubToken;
+                }
                 break;
             case ("bedrock", _):
             case (_, "bedrock"):
@@ -428,11 +440,24 @@ public sealed class DockerAgentRunner(
     {
         if (IsTruthy(ReadEnv(env, "CLAUDE_CODE_USE_GITHUB")))
         {
-            var token = FirstNonEmpty(env, "GITHUB_TOKEN", "GH_TOKEN")
-                ?? ResolveHostEnv("GITHUB_TOKEN")
+            var token = IsGithubModelsAgent(agent)
+                ? FirstNonEmpty(env, "GITHUB_TOKEN", "GH_TOKEN", "OPENAI_API_KEY")
+                : FirstNonEmpty(env, "GITHUB_TOKEN", "GH_TOKEN");
+            token ??= ResolveHostEnv("GITHUB_TOKEN")
                 ?? ResolveHostEnv("GH_TOKEN");
             if (string.IsNullOrWhiteSpace(token))
             {
+                if (IsGithubModelsAgent(agent))
+                {
+                    return """
+                        GitHub Models authentication is required before this agent can run.
+
+                        Create a GitHub personal access token with the `models` scope
+                        (or `models: read` for a fine-grained PAT/GitHub App token),
+                        then paste it into the agent's API key / token field.
+                        """;
+                }
+
                 return """
                     GitHub Copilot authentication is required before this agent can run.
 
@@ -467,6 +492,60 @@ public sealed class DockerAgentRunner(
         }
 
         return null;
+    }
+
+    private static string AnnotateAgentRunLog(AgentProfile agent, string log)
+    {
+        if (!IsGithubModelsAgent(agent))
+        {
+            return log;
+        }
+
+        if (log.Contains("Authentication failed for your OpenAI-compatible provider", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"""
+                {log}
+
+                GitHub Models authentication failed. For this provider Kanitel passes the token as GITHUB_TOKEN and OPENAI_API_KEY to https://models.github.ai/inference.
+                Check that the token is active and has GitHub Models access: classic PAT needs the `models` scope; fine-grained PAT or GitHub App token needs `models: read`.
+                """;
+        }
+
+        if (log.Contains("Request too large", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"""
+                {log}
+
+                GitHub Models rejected the OpenClaude request as too large. Kanitel's default command now uses OpenClaude --bare mode to avoid the oversized default tool catalog; if this agent has a custom command, add --bare before --print.
+                """;
+        }
+
+        return log;
+    }
+
+    private static bool IsGithubModelsAgent(AgentProfile agent)
+    {
+        return string.Equals(agent.ProviderPresetId, "github-models", StringComparison.OrdinalIgnoreCase) ||
+            IsGithubModelsBaseUrl(agent.BaseUrl);
+    }
+
+    private static bool IsGithubModelsBaseUrl(string? baseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(baseUrl))
+        {
+            return false;
+        }
+
+        try
+        {
+            var host = new Uri(baseUrl).Host;
+            return host.Equals("models.github.ai", StringComparison.OrdinalIgnoreCase) ||
+                host.EndsWith(".github.ai", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private string GetPublicApiUrl()
@@ -910,7 +989,8 @@ public sealed class DockerAgentRunner(
     {
         var trimmed = line.Trim();
         return trimmed.StartsWith("npm warn deprecated uuid@", StringComparison.OrdinalIgnoreCase) ||
-            trimmed.StartsWith("npm notice", StringComparison.OrdinalIgnoreCase);
+            trimmed.StartsWith("npm notice", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Contains("not in integration model metadata", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool ShouldCollapseProcessLogLine(string line)

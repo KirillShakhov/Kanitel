@@ -165,6 +165,10 @@ on the host.
 `KANITEL_DOCKER_NPM_CACHE_VOLUME` keeps the `npx @gitlawb/openclaude` package cache between
 disposable containers. Set it to `none` to disable the shared cache.
 
+The default OpenClaude command uses `--bare` for disposable Kanitel runs. That keeps GitHub Models
+requests small by disabling auto-discovery, background hooks, LSP/plugin sync, and the full default
+tool catalog while still leaving the agent with shell/read/edit capability inside its container.
+
 Agents can report back with simple HTTP callbacks:
 
 ```bash
