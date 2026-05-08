@@ -2387,7 +2387,7 @@ function initialAgentDraft(preset?: ProviderPreset, template?: AgentTemplate): A
     apiKeyEnvName: selectedPreset.apiKeyEnvName,
     apiKeyValue: '',
     containerImage: 'node:22-bookworm',
-    commandTemplate: 'npx -y @gitlawb/openclaude@latest --print "$(cat "$KANITEL_TASK_PROMPT_FILE")"',
+    commandTemplate: 'npx --yes --quiet --loglevel=error @gitlawb/openclaude@latest --print "$(cat "$KANITEL_TASK_PROMPT_FILE")"',
     systemPrompt: selectedTemplate.systemPrompt,
     enabled: true,
     environment: envToPairs(selectedPreset.environment)

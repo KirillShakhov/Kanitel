@@ -90,6 +90,7 @@ KANITEL_AGENT_POLL_INTERVAL_SECONDS=20
 KANITEL_AGENT_TIMEOUT_MINUTES=30
 KANITEL_PUBLIC_API_URL=http://host.docker.internal:8080
 KANITEL_DOCKER_ADD_HOST_GATEWAY=true
+KANITEL_DOCKER_NPM_CACHE_VOLUME=kanitel-agent-npm-cache
 KANITEL_AGENT_PROMPT_MAX_CHARS=120000
 KANITEL_AGENT_PROMPT_MAX_COMMENTS=25
 KANITEL_AGENT_PROMPT_COMMENT_MAX_CHARS=6000
@@ -160,6 +161,9 @@ KANITEL_TASK_PROMPT_FILE=/workspace/task.md
 Docker container: Kanitel copies the prepared workspace into the agent container with `docker cp`,
 then copies the result back. Use `bind` only when the workspace path is visible to the Docker daemon
 on the host.
+
+`KANITEL_DOCKER_NPM_CACHE_VOLUME` keeps the `npx @gitlawb/openclaude` package cache between
+disposable containers. Set it to `none` to disable the shared cache.
 
 Agents can report back with simple HTTP callbacks:
 

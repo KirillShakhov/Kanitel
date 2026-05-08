@@ -68,6 +68,7 @@ public sealed class DockerAgentRunner(
         try
         {
             var dockerResult = await RunDockerAsync(run, agent, workspace, log, cancellationToken);
+            log.AppendLine($"Agent container exit code: {dockerResult.ExitCode}.");
             log.AppendLine(dockerResult.Log);
             return new AgentRunResult(
                 dockerResult.ExitCode == 0,
@@ -150,6 +151,7 @@ public sealed class DockerAgentRunner(
         var containerName = $"kanitel-agent-{run.Id}".Replace('_', '-');
         var image = string.IsNullOrWhiteSpace(agent.ContainerImage) ? "node:22-bookworm" : agent.ContainerImage;
         var workspaceMode = ReadString("KANITEL_DOCKER_WORKSPACE_MODE", "copy");
+        var npmCacheVolume = ReadString("KANITEL_DOCKER_NPM_CACHE_VOLUME", "kanitel-agent-npm-cache");
         var agentEnvironment = BuildAgentEnvironment(agent);
         var validationError = ValidateAgentEnvironment(agent, agentEnvironment);
         if (validationError is not null)
@@ -161,6 +163,10 @@ public sealed class DockerAgentRunner(
 
         log.AppendLine($"Starting Docker container {containerName} using image {image}.");
         log.AppendLine($"Docker workspace mode: {workspaceMode}.");
+        if (!IsDisabled(npmCacheVolume))
+        {
+            log.AppendLine($"Docker npm cache volume: {npmCacheVolume}.");
+        }
 
         return string.Equals(workspaceMode, "bind", StringComparison.OrdinalIgnoreCase)
             ? await RunDockerWithBindWorkspaceAsync(containerName, image, command, dockerOptions, workspace, cancellationToken)
@@ -197,6 +203,13 @@ public sealed class DockerAgentRunner(
         {
             dockerOptions.Add("--add-host");
             dockerOptions.Add("host.docker.internal:host-gateway");
+        }
+
+        var npmCacheVolume = ReadString("KANITEL_DOCKER_NPM_CACHE_VOLUME", "kanitel-agent-npm-cache");
+        if (!IsDisabled(npmCacheVolume))
+        {
+            dockerOptions.Add("-v");
+            dockerOptions.Add($"{npmCacheVolume}:/root/.npm");
         }
 
         foreach (var (key, value) in agentEnvironment)
@@ -339,6 +352,14 @@ public sealed class DockerAgentRunner(
         RemoveProviderSelectionFlags(env);
         env["CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"] = "1";
         env["CLAUDE_CODE_PROVIDER_PROFILE_ENV_APPLIED"] = "1";
+        env.TryAdd("NPM_CONFIG_LOGLEVEL", "error");
+        env.TryAdd("NPM_CONFIG_UPDATE_NOTIFIER", "false");
+        env.TryAdd("NPM_CONFIG_FUND", "false");
+        env.TryAdd("NPM_CONFIG_AUDIT", "false");
+        env.TryAdd("NO_UPDATE_NOTIFIER", "1");
+        env.TryAdd("DISABLE_AUTOUPDATER", "1");
+        env.TryAdd("DISABLE_TELEMETRY", "1");
+        env.TryAdd("DISABLE_COST_WARNINGS", "1");
 
         var providerApiKey = ResolveAgentApiKey(agent);
         if (!string.IsNullOrWhiteSpace(providerApiKey) &&
@@ -626,6 +647,15 @@ public sealed class DockerAgentRunner(
             value.Equals("yes", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsDisabled(string value)
+    {
+        return string.IsNullOrWhiteSpace(value) ||
+            value.Equals("0", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("false", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("none", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("off", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string? ResolveHostEnv(string envName)
     {
         return string.IsNullOrWhiteSpace(envName)
@@ -830,7 +860,62 @@ public sealed class DockerAgentRunner(
         var output = await stdoutTask;
         var error = await stderrTask;
         var combined = string.Join(Environment.NewLine, new[] { output, error }.Where(s => !string.IsNullOrWhiteSpace(s)));
-        return new ProcessResult(process.ExitCode, TrimLog(combined));
+        return new ProcessResult(process.ExitCode, TrimLog(SanitizeProcessLog(combined)));
+    }
+
+    private static string SanitizeProcessLog(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+
+        var lines = value.Replace("\r\n", "\n").Split('\n');
+        var output = new List<string>();
+        var repeated = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        foreach (var line in lines)
+        {
+            if (ShouldDropProcessLogLine(line))
+            {
+                continue;
+            }
+
+            if (ShouldCollapseProcessLogLine(line))
+            {
+                repeated.TryGetValue(line, out var count);
+                repeated[line] = count + 1;
+                if (count == 0)
+                {
+                    output.Add(line);
+                }
+                continue;
+            }
+
+            output.Add(line);
+        }
+
+        foreach (var (line, count) in repeated)
+        {
+            if (count > 1)
+            {
+                output.Add($"[Kanitel] Previous line repeated {count - 1:n0} time(s): {line}");
+            }
+        }
+
+        return string.Join(Environment.NewLine, output).Trim();
+    }
+
+    private static bool ShouldDropProcessLogLine(string line)
+    {
+        var trimmed = line.Trim();
+        return trimmed.StartsWith("npm warn deprecated uuid@", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("npm notice", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ShouldCollapseProcessLogLine(string line)
+    {
+        return line.Contains("not in integration model metadata", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void TryKill(Process process)
