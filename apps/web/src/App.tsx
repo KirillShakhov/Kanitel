@@ -1141,6 +1141,10 @@ function BoardPage({
   onDragOverColumn: (id: string) => void
   onDropTask: (columnId: string) => void
 }) {
+  const activeFilterParticipant = participants.find(participant => participant.key === assigneeFilter)
+  const filterLabel = activeFilterParticipant?.name
+    ?? (assigneeFilter === 'unassigned' ? t.noAssignee : t.allAssignees)
+
   return (
     <section className="board-page">
       <div className="page-heading">
@@ -1149,8 +1153,17 @@ function BoardPage({
           <p>{project.description || t.noDescription}</p>
         </div>
         <div className="board-heading-actions">
-          <label className="board-filter">
-            {t.assigneeFilter}
+          <div className="board-filter" aria-label={t.assigneeFilter}>
+            <span className="filter-caption">{t.assigneeFilter}</span>
+            <div className="filter-control">
+              {activeFilterParticipant ? (
+                <Avatar name={activeFilterParticipant.name} url={activeFilterParticipant.avatarUrl} />
+              ) : (
+                <span className="filter-all-avatar">{assigneeFilter === 'unassigned' ? '-' : '*'}</span>
+              )}
+              <strong>{filterLabel}</strong>
+              <span className="filter-chevron">⌄</span>
+            </div>
             <select value={assigneeFilter} onChange={event => onAssigneeFilterChange(event.target.value)}>
               <option value="all">{t.allAssignees}</option>
               <option value="unassigned">{t.noAssignee}</option>
@@ -1158,12 +1171,8 @@ function BoardPage({
                 <option key={participant.key} value={participant.key}>{participant.name}</option>
               ))}
             </select>
-            <ParticipantBadge
-              participant={participants.find(participant => participant.key === assigneeFilter)}
-              fallback={assigneeFilter === 'unassigned' ? t.noAssignee : t.allAssignees}
-            />
-          </label>
-          <span>{tasks.length}</span>
+          </div>
+          <span className="board-task-count">{tasks.length}</span>
         </div>
       </div>
 
