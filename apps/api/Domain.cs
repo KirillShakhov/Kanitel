@@ -3,6 +3,7 @@ namespace Kanitel.Api;
 public sealed class KanitelState
 {
     public string SchemaVersion { get; set; } = "1";
+    public List<UserAccount> Accounts { get; set; } = [];
     public List<Project> Projects { get; set; } = [];
     public List<BoardColumn> Columns { get; set; } = [];
     public List<Person> People { get; set; } = [];
@@ -40,6 +41,18 @@ public sealed class Person
     public string Email { get; set; } = "";
     public string AvatarUrl { get; set; } = "";
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class UserAccount
+{
+    public string Id { get; set; } = Ids.New("account");
+    public string PersonId { get; set; } = "";
+    public string Email { get; set; } = "";
+    public string PasswordHash { get; set; } = "";
+    public string PasswordSalt { get; set; } = "";
+    public string SessionToken { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? LastLoginAt { get; set; }
 }
 
 public sealed class ProjectMember

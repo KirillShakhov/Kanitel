@@ -1,10 +1,14 @@
 import {
   Bot,
   CheckCircle2,
+  Folder,
   GitBranch,
+  GripVertical,
   Languages,
   LayoutDashboard,
   Loader2,
+  LogIn,
+  LogOut,
   MessageSquare,
   Moon,
   Play,
@@ -14,35 +18,65 @@ import {
   Settings,
   Sun,
   Trash2,
-  Users
+  UserPlus,
+  Users,
+  X
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { deleteJson, loadBootstrap, patchJson, postJson } from './api'
+import { deleteJson, loadBootstrap, patchJson, postJson, readAuthToken, storeAuthToken } from './api'
 import type {
   AgentProfile,
   AgentTemplate,
+  AuthResponse,
   BoardColumn,
   BootstrapPayload,
+  KanitelState,
   Person,
   Project,
   ProjectAgent,
   ProviderPreset,
-  TaskCard
+  TaskCard,
+  TaskComment
 } from './types'
 
-type Tab = 'board' | 'project' | 'agents'
+type Tab = 'board' | 'projects' | 'settings'
 type Theme = 'light' | 'dark'
 type Locale = 'ru' | 'en'
+type ParticipantKind = 'person' | 'agent'
 
 type TaskDraft = {
   title: string
   description: string
   columnId: string
-  assigneeAgentId: string
+  assigneeId: string
   assignmentRole: string
   priority: string
   initialComment: string
+}
+
+type AuthDraft = {
+  displayName: string
+  email: string
+  password: string
+  avatarUrl: string
+}
+
+type ProfileDraft = {
+  displayName: string
+  email: string
+  avatarUrl: string
+  password: string
+}
+
+type ParticipantDraft = {
+  kind: ParticipantKind
+  personId: string
+  agentId: string
+  displayName: string
+  email: string
+  avatarUrl: string
+  role: string
 }
 
 type AgentDraft = {
@@ -60,60 +94,88 @@ type AgentDraft = {
   environmentText: string
 }
 
+type Participant = {
+  key: string
+  kind: ParticipantKind
+  id: string
+  linkId: string
+  name: string
+  email?: string
+  avatarUrl?: string | null
+  role: string
+}
+
 const labels = {
   ru: {
     loading: 'Загрузка Kanitel',
-    schedulerInfo: (runner: string, seconds: number) => `${runner} · ${seconds}s · API /api/openapi.json`,
-    newProjectTitle: 'Новый проект',
+    loginTitle: 'Вход в Kanitel',
+    registerTitle: 'Регистрация',
+    login: 'Войти',
+    register: 'Создать аккаунт',
+    haveAccount: 'Уже есть аккаунт',
+    needAccount: 'Нужен аккаунт',
+    displayName: 'Имя',
+    email: 'Email',
+    password: 'Пароль',
+    avatarUrl: 'Аватар URL',
+    navBoard: 'Доска',
+    navProjects: 'Проекты',
+    navSettings: 'Настройки',
+    project: 'Проект',
     refreshTitle: 'Обновить',
     darkThemeTitle: 'Темная тема',
     lightThemeTitle: 'Светлая тема',
     languageTitle: 'Switch to English',
     languageButton: 'EN',
     checkNow: 'Проверить',
-    projectNamePlaceholder: 'Название проекта',
-    descriptionPlaceholder: 'Описание',
-    create: 'Создать',
-    boardTab: 'Доска',
-    projectTab: 'Проект',
-    agentsTab: 'Агенты',
-    addTaskTitle: 'Добавить задачу',
-    titlePlaceholder: 'Заголовок',
-    noAgentOption: 'Без агента',
-    add: 'Добавить',
-    noDescription: 'Без описания',
-    taskTitle: 'Заголовок',
+    logout: 'Выйти',
+    schedulerInfo: (runner: string, seconds: number) => `${runner} · ${seconds}s · API /api/openapi.json`,
+    newProject: 'Новый проект',
+    projectName: 'Название проекта',
     description: 'Описание',
-    status: 'Статус',
-    priority: 'Приоритет',
+    create: 'Создать',
+    save: 'Сохранить',
+    activeProject: 'Активный проект',
+    columns: 'Колонки',
+    participants: 'Участники',
+    repositories: 'Репозитории',
+    addColumn: 'Добавить колонку',
+    columnName: 'Новая колонка',
+    deleteColumn: 'Удалить колонку',
+    addParticipant: 'Добавить участника',
+    participantType: 'Тип участника',
+    person: 'Человек',
     agent: 'Агент',
-    unassignedAgent: 'Не назначен',
+    selectPerson: 'Выбрать человека',
+    selectAgent: 'Выбрать агента',
+    role: 'Роль',
+    remove: 'Убрать',
+    repositoryName: 'Название',
+    repositoryUrl: 'https:// или git@host:path.git',
+    branch: 'Ветка',
+    authMode: 'Доступ',
+    deleteRepository: 'Удалить репозиторий',
+    addTask: 'Добавить задачу',
+    title: 'Заголовок',
+    priority: 'Приоритет',
+    assignee: 'Исполнитель',
+    noAssignee: 'Без исполнителя',
     taskRole: 'Роль в задаче',
+    noDescription: 'Без описания',
+    noTasks: 'Пока пусто',
+    taskDetails: 'Задача',
+    status: 'Статус',
     saveTask: 'Сохранить задачу',
     comments: 'Комментарии',
     commentPlaceholder: 'Комментарий',
     send: 'Отправить',
-    selectTask: 'Выберите задачу',
-    columns: 'Колонки',
-    deleteColumnTitle: 'Удалить колонку',
-    newColumnPlaceholder: 'Новая колонка',
-    addColumnTitle: 'Добавить колонку',
-    access: 'Доступ',
-    removeAccessTitle: 'Убрать доступ',
-    personNamePlaceholder: 'Имя',
-    repositories: 'Репозитории',
-    deleteRepositoryTitle: 'Удалить репозиторий',
-    repositoryNamePlaceholder: 'Название',
-    repositoryUrlPlaceholder: 'https:// или git@host:path.git',
-    projectAgents: 'Агенты проекта',
-    removeAgentTitle: 'Убрать агента',
-    selectAgent: 'Выберите агента',
-    addAgentTitle: 'Добавить агента',
-    agentProfile: 'Профиль агента',
+    runs: 'Запуски',
+    profile: 'Профиль',
+    globalAgents: 'Глобальные агенты',
     newAgent: 'Новый агент',
+    agentProfile: 'Профиль агента',
     newButton: 'Новый',
-    save: 'Сохранить',
-    agentName: 'Имя',
+    agentName: 'Имя агента',
     template: 'Шаблон',
     avatarOrLogo: 'Аватар или логотип',
     provider: 'Провайдер',
@@ -122,12 +184,14 @@ const labels = {
     apiEnv: 'API env',
     image: 'Образ',
     command: 'Команда',
-    systemPrompt: 'Системный prompt',
+    systemPrompt: 'Системный промпт',
     environment: 'Окружение',
     enabled: 'Включен',
-    noAgentMeta: 'нет агента',
-    unassigned: 'unassigned',
-    noRuns: 'idle',
+    appearance: 'Вид',
+    theme: 'Тема',
+    language: 'Язык',
+    noRuns: 'запусков нет',
+    system: 'система',
     priorities: {
       low: 'Низкий',
       normal: 'Обычный',
@@ -137,57 +201,74 @@ const labels = {
   },
   en: {
     loading: 'Loading Kanitel',
-    schedulerInfo: (runner: string, seconds: number) => `${runner} · ${seconds}s · API /api/openapi.json`,
-    newProjectTitle: 'New project',
+    loginTitle: 'Sign in to Kanitel',
+    registerTitle: 'Create account',
+    login: 'Sign in',
+    register: 'Create account',
+    haveAccount: 'I have an account',
+    needAccount: 'Create an account',
+    displayName: 'Name',
+    email: 'Email',
+    password: 'Password',
+    avatarUrl: 'Avatar URL',
+    navBoard: 'Board',
+    navProjects: 'Projects',
+    navSettings: 'Settings',
+    project: 'Project',
     refreshTitle: 'Refresh',
     darkThemeTitle: 'Dark theme',
     lightThemeTitle: 'Light theme',
     languageTitle: 'Переключить на русский',
     languageButton: 'RU',
     checkNow: 'Check now',
-    projectNamePlaceholder: 'Project name',
-    descriptionPlaceholder: 'Description',
-    create: 'Create',
-    boardTab: 'Board',
-    projectTab: 'Project',
-    agentsTab: 'Agents',
-    addTaskTitle: 'Add task',
-    titlePlaceholder: 'Title',
-    noAgentOption: 'No agent',
-    add: 'Add',
-    noDescription: 'No description',
-    taskTitle: 'Title',
+    logout: 'Log out',
+    schedulerInfo: (runner: string, seconds: number) => `${runner} · ${seconds}s · API /api/openapi.json`,
+    newProject: 'New project',
+    projectName: 'Project name',
     description: 'Description',
-    status: 'Status',
-    priority: 'Priority',
+    create: 'Create',
+    save: 'Save',
+    activeProject: 'Active project',
+    columns: 'Columns',
+    participants: 'Participants',
+    repositories: 'Repositories',
+    addColumn: 'Add column',
+    columnName: 'New column',
+    deleteColumn: 'Delete column',
+    addParticipant: 'Add participant',
+    participantType: 'Participant type',
+    person: 'Person',
     agent: 'Agent',
-    unassignedAgent: 'Unassigned',
+    selectPerson: 'Select person',
+    selectAgent: 'Select agent',
+    role: 'Role',
+    remove: 'Remove',
+    repositoryName: 'Name',
+    repositoryUrl: 'https:// or git@host:path.git',
+    branch: 'Branch',
+    authMode: 'Access',
+    deleteRepository: 'Delete repository',
+    addTask: 'Add task',
+    title: 'Title',
+    priority: 'Priority',
+    assignee: 'Assignee',
+    noAssignee: 'Unassigned',
     taskRole: 'Task role',
+    noDescription: 'No description',
+    noTasks: 'Nothing here yet',
+    taskDetails: 'Task',
+    status: 'Status',
     saveTask: 'Save task',
     comments: 'Comments',
     commentPlaceholder: 'Comment',
     send: 'Send',
-    selectTask: 'Select a task',
-    columns: 'Columns',
-    deleteColumnTitle: 'Delete column',
-    newColumnPlaceholder: 'New column',
-    addColumnTitle: 'Add column',
-    access: 'Access',
-    removeAccessTitle: 'Remove access',
-    personNamePlaceholder: 'Name',
-    repositories: 'Repositories',
-    deleteRepositoryTitle: 'Delete repository',
-    repositoryNamePlaceholder: 'Name',
-    repositoryUrlPlaceholder: 'https:// or git@host:path.git',
-    projectAgents: 'Project agents',
-    removeAgentTitle: 'Remove agent',
-    selectAgent: 'Select agent',
-    addAgentTitle: 'Add agent',
-    agentProfile: 'Agent profile',
+    runs: 'Runs',
+    profile: 'Profile',
+    globalAgents: 'Global agents',
     newAgent: 'New agent',
+    agentProfile: 'Agent profile',
     newButton: 'New',
-    save: 'Save',
-    agentName: 'Name',
+    agentName: 'Agent name',
     template: 'Template',
     avatarOrLogo: 'Avatar or logo',
     provider: 'Provider',
@@ -199,9 +280,11 @@ const labels = {
     systemPrompt: 'System prompt',
     environment: 'Environment',
     enabled: 'Enabled',
-    noAgentMeta: 'no agent',
-    unassigned: 'unassigned',
-    noRuns: 'idle',
+    appearance: 'Appearance',
+    theme: 'Theme',
+    language: 'Language',
+    noRuns: 'no runs',
+    system: 'system',
     priorities: {
       low: 'Low',
       normal: 'Normal',
@@ -217,28 +300,51 @@ const emptyTaskDraft: TaskDraft = {
   title: '',
   description: '',
   columnId: '',
-  assigneeAgentId: '',
+  assigneeId: '',
   assignmentRole: 'worker',
   priority: 'normal',
   initialComment: ''
 }
 
+const emptyAuthDraft: AuthDraft = {
+  displayName: '',
+  email: '',
+  password: '',
+  avatarUrl: ''
+}
+
+const emptyParticipantDraft: ParticipantDraft = {
+  kind: 'person',
+  personId: '',
+  agentId: '',
+  displayName: '',
+  email: '',
+  avatarUrl: '',
+  role: 'editor'
+}
+
 export default function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapPayload | null>(null)
+  const [currentUser, setCurrentUser] = useState<Person | null>(null)
+  const [authToken, setAuthToken] = useState(() => readAuthToken())
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login')
+  const [authDraft, setAuthDraft] = useState<AuthDraft>(emptyAuthDraft)
+  const [profileDraft, setProfileDraft] = useState<ProfileDraft>(() => emptyProfileDraft())
   const [activeProjectId, setActiveProjectId] = useState('')
   const [activeTab, setActiveTab] = useState<Tab>('board')
   const [theme, setTheme] = useState<Theme>(() => readTheme())
   const [locale, setLocale] = useState<Locale>(() => readLocale())
   const [selectedTaskId, setSelectedTaskId] = useState('')
-  const [newProjectOpen, setNewProjectOpen] = useState(false)
-  const [projectDraft, setProjectDraft] = useState({ name: '', description: '' })
   const [newTaskColumnId, setNewTaskColumnId] = useState('')
+  const [draggedTaskId, setDraggedTaskId] = useState('')
+  const [dragOverColumnId, setDragOverColumnId] = useState('')
   const [taskDraft, setTaskDraft] = useState<TaskDraft>(emptyTaskDraft)
   const [commentDraft, setCommentDraft] = useState('')
-  const [columnDraft, setColumnDraft] = useState({ name: '', color: '#2563eb' })
-  const [memberDraft, setMemberDraft] = useState({ displayName: '', email: '', avatarUrl: '', role: 'editor' })
+  const [projectDraft, setProjectDraft] = useState({ name: '', description: '' })
+  const [projectEditDraft, setProjectEditDraft] = useState({ name: '', description: '' })
+  const [columnDraft, setColumnDraft] = useState({ name: '', color: '#d89b72' })
+  const [participantDraft, setParticipantDraft] = useState<ParticipantDraft>(emptyParticipantDraft)
   const [repoDraft, setRepoDraft] = useState({ name: '', url: '', branch: '', authMode: 'http' })
-  const [projectAgentDraft, setProjectAgentDraft] = useState({ agentId: '', role: 'worker' })
   const [agentDraft, setAgentDraft] = useState<AgentDraft>(() => initialAgentDraft())
   const [selectedAgentId, setSelectedAgentId] = useState('')
   const [busy, setBusy] = useState(false)
@@ -247,20 +353,26 @@ export default function App() {
 
   const refresh = useCallback(async () => {
     const payload = await loadBootstrap()
+    if (readAuthToken() && !payload.currentUser) {
+      storeAuthToken('')
+      setAuthToken('')
+      setBootstrap(null)
+      setCurrentUser(null)
+      return
+    }
+
     setBootstrap(payload)
+    setCurrentUser(payload.currentUser ?? null)
+    if (payload.currentUser) {
+      setProfileDraft(draft => ({
+        displayName: draft.displayName || payload.currentUser?.displayName || '',
+        email: draft.email || payload.currentUser?.email || '',
+        avatarUrl: draft.avatarUrl || payload.currentUser?.avatarUrl || '',
+        password: ''
+      }))
+    }
     setError('')
   }, [])
-
-  useEffect(() => {
-    refresh().catch((err: Error) => setError(err.message))
-  }, [refresh])
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      refresh().catch(() => undefined)
-    }, 5000)
-    return () => window.clearInterval(timer)
-  }, [refresh])
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -271,6 +383,28 @@ export default function App() {
     document.documentElement.lang = locale
     window.localStorage.setItem('kanitel-locale', locale)
   }, [locale])
+
+  useEffect(() => {
+    if (!authToken) {
+      setBootstrap(null)
+      setCurrentUser(null)
+      return
+    }
+
+    refresh().catch((err: Error) => {
+      setError(err.message)
+      storeAuthToken('')
+      setAuthToken('')
+    })
+  }, [authToken, refresh])
+
+  useEffect(() => {
+    if (!authToken) return
+    const timer = window.setInterval(() => {
+      refresh().catch(() => undefined)
+    }, 5000)
+    return () => window.clearInterval(timer)
+  }, [authToken, refresh])
 
   const state = bootstrap?.state
   const projects = state?.projects ?? []
@@ -295,15 +429,20 @@ export default function App() {
       .sort((a, b) => a.position - b.position || b.updatedAt.localeCompare(a.updatedAt)),
     [state, activeProject?.id]
   )
-  const projectAgents = useMemo(() => {
-    if (!state || !activeProject) return []
-    return state.projectAgents
-      .filter(link => link.projectId === activeProject.id)
-      .map(link => ({ link, agent: state.agents.find(agent => agent.id === link.agentId) }))
-      .filter((item): item is { link: ProjectAgent; agent: AgentProfile } => Boolean(item.agent))
-  }, [state, activeProject])
+  const participants = useMemo(
+    () => state && activeProject ? buildParticipants(state, activeProject.id) : [],
+    [state, activeProject]
+  )
   const selectedTask = tasks.find(task => task.id === selectedTaskId)
   const selectedAgent = state?.agents.find(agent => agent.id === selectedAgentId)
+
+  useEffect(() => {
+    if (!activeProject) return
+    setProjectEditDraft({
+      name: activeProject.name,
+      description: activeProject.description
+    })
+  }, [activeProject?.id])
 
   useEffect(() => {
     if (!selectedTask) return
@@ -311,7 +450,7 @@ export default function App() {
       title: selectedTask.title,
       description: selectedTask.description,
       columnId: selectedTask.columnId,
-      assigneeAgentId: selectedTask.assigneeAgentId ?? '',
+      assigneeId: assigneeValue(selectedTask),
       assignmentRole: selectedTask.assignmentRole || 'worker',
       priority: selectedTask.priority,
       initialComment: ''
@@ -336,6 +475,16 @@ export default function App() {
     })
   }, [selectedAgent])
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setSelectedTaskId('')
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   async function mutate(action: Promise<unknown>) {
     setBusy(true)
     setError('')
@@ -349,19 +498,62 @@ export default function App() {
     }
   }
 
+  async function authenticate() {
+    setBusy(true)
+    setError('')
+    try {
+      const path = authMode === 'login' ? '/api/auth/login' : '/api/auth/register'
+      const payload = authMode === 'login'
+        ? { email: authDraft.email, password: authDraft.password }
+        : authDraft
+      const result = await postJson<AuthResponse>(path, payload)
+      storeAuthToken(result.token)
+      setAuthToken(result.token)
+      setCurrentUser(result.person)
+      setProfileDraft(toProfileDraft(result.person))
+      setAuthDraft(emptyAuthDraft)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function logout() {
+    storeAuthToken('')
+    setAuthToken('')
+    setCurrentUser(null)
+    setBootstrap(null)
+  }
+
+  async function updateProfile() {
+    const result = await postProfile(profileDraft)
+    setCurrentUser(result.person)
+    setProfileDraft(toProfileDraft(result.person))
+    await refresh()
+  }
+
   async function createProject() {
     if (!projectDraft.name.trim()) return
     await mutate(postJson<Project>('/api/projects', projectDraft))
     setProjectDraft({ name: '', description: '' })
-    setNewProjectOpen(false)
+  }
+
+  async function saveProject() {
+    if (!activeProject) return
+    await mutate(patchJson<Project>(`/api/projects/${activeProject.id}`, projectEditDraft))
   }
 
   async function createTask(columnId: string) {
     if (!activeProject || !taskDraft.title.trim()) return
+    const assignment = splitAssignee(taskDraft.assigneeId)
     await mutate(postJson<TaskCard>(`/api/projects/${activeProject.id}/tasks`, {
       ...taskDraft,
       columnId,
-      authorId: state?.people[0]?.id ?? 'owner'
+      assigneeAgentId: assignment.assigneeAgentId,
+      assigneePersonId: assignment.assigneePersonId,
+      authorType: 'person',
+      authorId: currentUser?.id ?? 'owner'
     }))
     setTaskDraft(emptyTaskDraft)
     setNewTaskColumnId('')
@@ -369,7 +561,22 @@ export default function App() {
 
   async function saveTask() {
     if (!selectedTask) return
-    await mutate(patchJson<TaskCard>(`/api/tasks/${selectedTask.id}`, taskDraft))
+    const assignment = splitAssignee(taskDraft.assigneeId)
+    await mutate(patchJson<TaskCard>(`/api/tasks/${selectedTask.id}`, {
+      title: taskDraft.title,
+      description: taskDraft.description,
+      columnId: taskDraft.columnId,
+      assigneeAgentId: assignment.assigneeAgentId,
+      assigneePersonId: assignment.assigneePersonId,
+      assignmentRole: taskDraft.assignmentRole,
+      priority: taskDraft.priority
+    }))
+  }
+
+  async function moveTask(taskId: string, columnId: string) {
+    if (!activeProject) return
+    const targetPosition = tasks.filter(task => task.columnId === columnId && task.id !== taskId).length
+    await mutate(patchJson<TaskCard>(`/api/tasks/${taskId}`, { columnId, position: targetPosition }))
   }
 
   async function addComment() {
@@ -377,43 +584,56 @@ export default function App() {
     await mutate(postJson(`/api/tasks/${selectedTask.id}/comments`, {
       body: commentDraft,
       authorType: 'person',
-      authorId: state?.people[0]?.id ?? 'owner'
+      authorId: currentUser?.id ?? 'owner'
     }))
     setCommentDraft('')
   }
 
-  async function createAgent() {
-    await mutate(postJson('/api/agents', {
-      name: agentDraft.name,
-      templateId: agentDraft.templateId,
-      avatarUrl: agentDraft.avatarUrl,
-      providerPresetId: agentDraft.providerPresetId,
-      model: agentDraft.model,
-      baseUrl: agentDraft.baseUrl,
-      apiKeyEnvName: agentDraft.apiKeyEnvName,
-      containerImage: agentDraft.containerImage,
-      commandTemplate: agentDraft.commandTemplate,
-      systemPrompt: agentDraft.systemPrompt,
-      enabled: agentDraft.enabled,
-      environment: parseEnvText(agentDraft.environmentText)
+  async function addParticipant() {
+    if (!activeProject) return
+    if (participantDraft.kind === 'agent') {
+      if (!participantDraft.agentId) return
+      await mutate(postJson(`/api/projects/${activeProject.id}/agents`, {
+        agentId: participantDraft.agentId,
+        role: participantDraft.role || 'worker'
+      }))
+      setParticipantDraft(emptyParticipantDraft)
+      return
+    }
+
+    if (!participantDraft.personId && !participantDraft.displayName.trim() && !participantDraft.email.trim()) return
+    await mutate(postJson(`/api/projects/${activeProject.id}/members`, {
+      personId: participantDraft.personId,
+      displayName: participantDraft.displayName,
+      email: participantDraft.email,
+      avatarUrl: participantDraft.avatarUrl,
+      role: participantDraft.role || 'editor'
     }))
+    setParticipantDraft(emptyParticipantDraft)
+  }
+
+  async function updateParticipantRole(participant: Participant, role: string) {
+    if (participant.kind === 'agent') {
+      await mutate(patchJson(`/api/project-agents/${participant.linkId}`, { role }))
+      return
+    }
+
+    await mutate(patchJson(`/api/members/${participant.linkId}`, { role }))
+  }
+
+  async function removeParticipant(participant: Participant) {
+    await mutate(deleteJson(participant.kind === 'agent'
+      ? `/api/project-agents/${participant.linkId}`
+      : `/api/members/${participant.linkId}`))
+  }
+
+  async function createAgent() {
+    await mutate(postJson('/api/agents', agentPayload(agentDraft)))
   }
 
   async function saveAgent() {
     if (!selectedAgent) return
-    await mutate(patchJson(`/api/agents/${selectedAgent.id}`, {
-      name: agentDraft.name,
-      avatarUrl: agentDraft.avatarUrl,
-      providerPresetId: agentDraft.providerPresetId,
-      model: agentDraft.model,
-      baseUrl: agentDraft.baseUrl,
-      apiKeyEnvName: agentDraft.apiKeyEnvName,
-      containerImage: agentDraft.containerImage,
-      commandTemplate: agentDraft.commandTemplate,
-      systemPrompt: agentDraft.systemPrompt,
-      enabled: agentDraft.enabled,
-      environment: parseEnvText(agentDraft.environmentText)
-    }))
+    await mutate(patchJson(`/api/agents/${selectedAgent.id}`, agentPayload(agentDraft)))
   }
 
   function applyPresetToDraft(presetId: string) {
@@ -441,7 +661,26 @@ export default function App() {
     }))
   }
 
-  if (!bootstrap || !state || !activeProject) {
+  if (!authToken) {
+    return (
+      <AuthScreen
+        labels={t}
+        theme={theme}
+        locale={locale}
+        mode={authMode}
+        draft={authDraft}
+        busy={busy}
+        error={error}
+        onModeChange={setAuthMode}
+        onDraftChange={setAuthDraft}
+        onSubmit={authenticate}
+        onTheme={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+        onLocale={() => setLocale(locale === 'ru' ? 'en' : 'ru')}
+      />
+    )
+  }
+
+  if (!bootstrap || !state || !currentUser) {
     return (
       <main className="loading-page">
         <Loader2 className="spin" size={22} />
@@ -456,11 +695,12 @@ export default function App() {
   const selectedTaskRuns = state.runs
     .filter(run => run.taskId === selectedTask?.id)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-  const unlinkedAgents = state.agents.filter(agent => !projectAgents.some(item => item.agent.id === agent.id))
+  const unlinkedAgents = state.agents.filter(agent =>
+    !participants.some(participant => participant.kind === 'agent' && participant.id === agent.id))
 
   return (
     <main className="app-shell">
-      <header className="topbar">
+      <header className="app-header">
         <div className="brand">
           <div className="brand-mark">K</div>
           <div>
@@ -469,15 +709,29 @@ export default function App() {
           </div>
         </div>
 
-        <div className="project-switcher">
-          <select value={activeProject.id} onChange={event => setActiveProjectId(event.target.value)}>
-            {projects.map(project => (
-              <option key={project.id} value={project.id}>{project.name}</option>
-            ))}
-          </select>
-          <button className="icon-button" title={t.newProjectTitle} onClick={() => setNewProjectOpen(value => !value)}>
-            <Plus size={18} />
+        <nav className="main-nav" aria-label="Main">
+          <button className={activeTab === 'board' ? 'active' : ''} onClick={() => setActiveTab('board')}>
+            <LayoutDashboard size={17} />
+            {t.navBoard}
           </button>
+          <button className={activeTab === 'projects' ? 'active' : ''} onClick={() => setActiveTab('projects')}>
+            <Folder size={17} />
+            {t.navProjects}
+          </button>
+          <button className={activeTab === 'settings' ? 'active' : ''} onClick={() => setActiveTab('settings')}>
+            <Settings size={17} />
+            {t.navSettings}
+          </button>
+        </nav>
+
+        <div className="header-actions">
+          {activeProject && (
+            <select value={activeProject.id} onChange={event => setActiveProjectId(event.target.value)} aria-label={t.project}>
+              {projects.map(project => (
+                <option key={project.id} value={project.id}>{project.name}</option>
+              ))}
+            </select>
+          )}
           <button className="icon-button" title={t.refreshTitle} onClick={() => mutate(refresh())} disabled={busy}>
             <RefreshCw size={18} />
           </button>
@@ -492,290 +746,866 @@ export default function App() {
             <Play size={16} />
             {t.checkNow}
           </button>
+          <div className="user-chip">
+            <Avatar name={currentUser.displayName} url={currentUser.avatarUrl} />
+            <span>{currentUser.displayName}</span>
+          </div>
+          <button className="icon-button" title={t.logout} onClick={logout}>
+            <LogOut size={18} />
+          </button>
         </div>
       </header>
 
-      {newProjectOpen && (
-        <section className="quick-create">
-          <input value={projectDraft.name} onChange={event => setProjectDraft({ ...projectDraft, name: event.target.value })} placeholder={t.projectNamePlaceholder} />
-          <input value={projectDraft.description} onChange={event => setProjectDraft({ ...projectDraft, description: event.target.value })} placeholder={t.descriptionPlaceholder} />
-          <button className="primary-button" onClick={createProject} disabled={busy}>
+      {error && <div className="error-line">{error}</div>}
+
+      {activeTab === 'board' && activeProject && (
+        <BoardPage
+          labels={t}
+          project={activeProject}
+          columns={columns}
+          tasks={tasks}
+          participants={participants}
+          runs={state.runs}
+          taskDraft={taskDraft}
+          newTaskColumnId={newTaskColumnId}
+          draggedTaskId={draggedTaskId}
+          dragOverColumnId={dragOverColumnId}
+          busy={busy}
+          onOpenTask={setSelectedTaskId}
+          onOpenNewTask={(columnId) => {
+            setNewTaskColumnId(columnId)
+            setTaskDraft({ ...emptyTaskDraft, columnId })
+          }}
+          onDraftChange={setTaskDraft}
+          onCreateTask={createTask}
+          onDragStart={setDraggedTaskId}
+          onDragOverColumn={setDragOverColumnId}
+          onDropTask={(columnId) => {
+            const taskId = draggedTaskId
+            setDraggedTaskId('')
+            setDragOverColumnId('')
+            if (taskId) {
+              moveTask(taskId, columnId)
+            }
+          }}
+        />
+      )}
+
+      {activeTab === 'projects' && (
+        <ProjectsPage
+          labels={t}
+          state={state}
+          activeProject={activeProject}
+          projects={projects}
+          participants={participants}
+          unlinkedAgents={unlinkedAgents}
+          projectDraft={projectDraft}
+          projectEditDraft={projectEditDraft}
+          columnDraft={columnDraft}
+          participantDraft={participantDraft}
+          repoDraft={repoDraft}
+          busy={busy}
+          onSelectProject={setActiveProjectId}
+          onProjectDraftChange={setProjectDraft}
+          onProjectEditDraftChange={setProjectEditDraft}
+          onCreateProject={createProject}
+          onSaveProject={saveProject}
+          onColumnDraftChange={setColumnDraft}
+          onAddColumn={() => {
+            if (!activeProject) return
+            mutate(postJson(`/api/projects/${activeProject.id}/columns`, columnDraft))
+            setColumnDraft({ name: '', color: '#d89b72' })
+          }}
+          onDeleteColumn={(columnId) => mutate(deleteJson(`/api/columns/${columnId}`))}
+          onParticipantDraftChange={setParticipantDraft}
+          onAddParticipant={addParticipant}
+          onUpdateParticipantRole={updateParticipantRole}
+          onRemoveParticipant={removeParticipant}
+          onRepoDraftChange={setRepoDraft}
+          onAddRepository={() => {
+            if (!activeProject) return
+            mutate(postJson(`/api/projects/${activeProject.id}/repositories`, repoDraft))
+            setRepoDraft({ name: '', url: '', branch: '', authMode: 'http' })
+          }}
+          onDeleteRepository={(repoId) => mutate(deleteJson(`/api/repositories/${repoId}`))}
+        />
+      )}
+
+      {activeTab === 'settings' && (
+        <SettingsPage
+          labels={t}
+          theme={theme}
+          locale={locale}
+          profileDraft={profileDraft}
+          agents={state.agents}
+          selectedAgentId={selectedAgentId}
+          selectedAgent={selectedAgent}
+          agentDraft={agentDraft}
+          presets={bootstrap.providerPresets}
+          templates={bootstrap.agentTemplates}
+          busy={busy}
+          onThemeChange={setTheme}
+          onLocaleChange={setLocale}
+          onProfileDraftChange={setProfileDraft}
+          onSaveProfile={() => mutate(updateProfile())}
+          onSelectAgent={setSelectedAgentId}
+          onNewAgent={() => {
+            setSelectedAgentId('')
+            setAgentDraft(initialAgentDraft(bootstrap.providerPresets[0], bootstrap.agentTemplates[0]))
+          }}
+          onAgentDraftChange={setAgentDraft}
+          onPreset={applyPresetToDraft}
+          onTemplate={applyTemplateToDraft}
+          onCreateAgent={createAgent}
+          onSaveAgent={saveAgent}
+        />
+      )}
+
+      {selectedTask && (
+        <TaskModal
+          labels={t}
+          locale={locale}
+          task={selectedTask}
+          draft={taskDraft}
+          columns={columns}
+          participants={participants}
+          comments={selectedTaskComments}
+          runs={selectedTaskRuns}
+          agents={state.agents}
+          people={state.people}
+          busy={busy}
+          commentDraft={commentDraft}
+          onClose={() => setSelectedTaskId('')}
+          onDraftChange={setTaskDraft}
+          onSave={saveTask}
+          onCommentDraftChange={setCommentDraft}
+          onAddComment={addComment}
+        />
+      )}
+    </main>
+  )
+}
+
+function AuthScreen({
+  labels: t,
+  theme,
+  locale,
+  mode,
+  draft,
+  busy,
+  error,
+  onModeChange,
+  onDraftChange,
+  onSubmit,
+  onTheme,
+  onLocale
+}: {
+  labels: Labels
+  theme: Theme
+  locale: Locale
+  mode: 'login' | 'register'
+  draft: AuthDraft
+  busy: boolean
+  error: string
+  onModeChange: (mode: 'login' | 'register') => void
+  onDraftChange: (draft: AuthDraft) => void
+  onSubmit: () => void
+  onTheme: () => void
+  onLocale: () => void
+}) {
+  return (
+    <main className="auth-page">
+      <section className="auth-panel">
+        <div className="auth-brand">
+          <div className="brand-mark">K</div>
+          <div>
+            <h1>Kanitel</h1>
+            <p>{mode === 'login' ? t.loginTitle : t.registerTitle}</p>
+          </div>
+        </div>
+
+        <div className="auth-actions">
+          <button className="icon-button" title={theme === 'dark' ? t.lightThemeTitle : t.darkThemeTitle} onClick={onTheme}>
+            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+          <button className="language-button" title={t.languageTitle} onClick={onLocale}>
+            <Languages size={16} />
+            {locale === 'ru' ? 'EN' : 'RU'}
+          </button>
+        </div>
+
+        <div className="stack-form">
+          {mode === 'register' && (
+            <>
+              <label>
+                {t.displayName}
+                <input value={draft.displayName} onChange={event => onDraftChange({ ...draft, displayName: event.target.value })} />
+              </label>
+              <label>
+                {t.avatarUrl}
+                <input value={draft.avatarUrl} onChange={event => onDraftChange({ ...draft, avatarUrl: event.target.value })} placeholder="https://..." />
+              </label>
+            </>
+          )}
+          <label>
+            {t.email}
+            <input value={draft.email} onChange={event => onDraftChange({ ...draft, email: event.target.value })} />
+          </label>
+          <label>
+            {t.password}
+            <input type="password" value={draft.password} onChange={event => onDraftChange({ ...draft, password: event.target.value })} />
+          </label>
+          {error && <div className="error-line compact-error">{error}</div>}
+          <button className="primary-button full" onClick={onSubmit} disabled={busy}>
+            <LogIn size={16} />
+            {mode === 'login' ? t.login : t.register}
+          </button>
+          <button className="secondary-button full" onClick={() => onModeChange(mode === 'login' ? 'register' : 'login')}>
+            {mode === 'login' ? t.needAccount : t.haveAccount}
+          </button>
+        </div>
+      </section>
+    </main>
+  )
+}
+
+function BoardPage({
+  labels: t,
+  project,
+  columns,
+  tasks,
+  participants,
+  runs,
+  taskDraft,
+  newTaskColumnId,
+  draggedTaskId,
+  dragOverColumnId,
+  busy,
+  onOpenTask,
+  onOpenNewTask,
+  onDraftChange,
+  onCreateTask,
+  onDragStart,
+  onDragOverColumn,
+  onDropTask
+}: {
+  labels: Labels
+  project: Project
+  columns: BoardColumn[]
+  tasks: TaskCard[]
+  participants: Participant[]
+  runs: Array<{ taskId: string; status: string; createdAt: string }>
+  taskDraft: TaskDraft
+  newTaskColumnId: string
+  draggedTaskId: string
+  dragOverColumnId: string
+  busy: boolean
+  onOpenTask: (id: string) => void
+  onOpenNewTask: (columnId: string) => void
+  onDraftChange: (draft: TaskDraft) => void
+  onCreateTask: (columnId: string) => void
+  onDragStart: (id: string) => void
+  onDragOverColumn: (id: string) => void
+  onDropTask: (columnId: string) => void
+}) {
+  return (
+    <section className="board-page">
+      <div className="page-heading">
+        <div>
+          <h2>{project.name}</h2>
+          <p>{project.description || t.noDescription}</p>
+        </div>
+        <span>{tasks.length}</span>
+      </div>
+
+      <div className="board-scroll">
+        {columns.map(column => (
+          <KanbanColumn
+            key={column.id}
+            labels={t}
+            column={column}
+            tasks={tasks.filter(task => task.columnId === column.id)}
+            participants={participants}
+            runs={runs}
+            taskDraft={taskDraft}
+            newTaskColumnId={newTaskColumnId}
+            draggedTaskId={draggedTaskId}
+            isDragOver={dragOverColumnId === column.id}
+            busy={busy}
+            onOpenTask={onOpenTask}
+            onOpenNewTask={() => onOpenNewTask(column.id)}
+            onDraftChange={onDraftChange}
+            onCreateTask={() => onCreateTask(column.id)}
+            onDragStart={onDragStart}
+            onDragOver={() => onDragOverColumn(column.id)}
+            onDrop={() => onDropTask(column.id)}
+          />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function KanbanColumn({
+  labels: t,
+  column,
+  tasks,
+  participants,
+  runs,
+  taskDraft,
+  newTaskColumnId,
+  draggedTaskId,
+  isDragOver,
+  busy,
+  onOpenTask,
+  onOpenNewTask,
+  onDraftChange,
+  onCreateTask,
+  onDragStart,
+  onDragOver,
+  onDrop
+}: {
+  labels: Labels
+  column: BoardColumn
+  tasks: TaskCard[]
+  participants: Participant[]
+  runs: Array<{ taskId: string; status: string; createdAt: string }>
+  taskDraft: TaskDraft
+  newTaskColumnId: string
+  draggedTaskId: string
+  isDragOver: boolean
+  busy: boolean
+  onOpenTask: (id: string) => void
+  onOpenNewTask: () => void
+  onDraftChange: (draft: TaskDraft) => void
+  onCreateTask: () => void
+  onDragStart: (id: string) => void
+  onDragOver: () => void
+  onDrop: () => void
+}) {
+  return (
+    <section
+      className={`column ${isDragOver ? 'drop-target' : ''}`}
+      onDragOver={event => {
+        event.preventDefault()
+        onDragOver()
+      }}
+      onDrop={event => {
+        event.preventDefault()
+        onDrop()
+      }}
+    >
+      <header className="column-header" style={{ borderTopColor: column.color }}>
+        <div>
+          <h2>{column.name}</h2>
+          <span>{tasks.length}{column.wipLimit ? ` / ${column.wipLimit}` : ''}</span>
+        </div>
+        <button className="icon-button compact" title={t.addTask} onClick={onOpenNewTask}>
+          <Plus size={16} />
+        </button>
+      </header>
+
+      {newTaskColumnId === column.id && (
+        <div className="inline-form">
+          <input value={taskDraft.title} onChange={event => onDraftChange({ ...taskDraft, title: event.target.value })} placeholder={t.title} />
+          <textarea value={taskDraft.description} onChange={event => onDraftChange({ ...taskDraft, description: event.target.value })} placeholder={t.description} rows={3} />
+          <div className="form-grid two">
+            <select value={taskDraft.assigneeId} onChange={event => onDraftChange({ ...taskDraft, assigneeId: event.target.value })}>
+              <option value="">{t.noAssignee}</option>
+              {participants.map(participant => (
+                <option key={participant.key} value={participant.key}>{participant.name}</option>
+              ))}
+            </select>
+            <select value={taskDraft.priority} onChange={event => onDraftChange({ ...taskDraft, priority: event.target.value })}>
+              <option value="low">{t.priorities.low}</option>
+              <option value="normal">{t.priorities.normal}</option>
+              <option value="high">{t.priorities.high}</option>
+              <option value="urgent">{t.priorities.urgent}</option>
+            </select>
+          </div>
+          <button className="primary-button" onClick={onCreateTask} disabled={busy}>
             <Plus size={16} />
             {t.create}
           </button>
-        </section>
+        </div>
       )}
 
-      {error && <div className="error-line">{error}</div>}
+      <div className="task-list">
+        {tasks.length === 0 && <div className="empty-column">{t.noTasks}</div>}
+        {tasks.map(task => (
+          <button
+            key={task.id}
+            className={`task-card ${draggedTaskId === task.id ? 'dragging' : ''}`}
+            draggable
+            onDragStart={event => {
+              event.dataTransfer.effectAllowed = 'move'
+              onDragStart(task.id)
+            }}
+            onDragEnd={() => onDragStart('')}
+            onClick={() => onOpenTask(task.id)}
+          >
+            <span className={`priority ${task.priority}`}>{priorityLabel(task.priority, t)}</span>
+            <strong>{task.title}</strong>
+            <span className="task-description">{task.description || t.noDescription}</span>
+            <TaskMeta labels={t} task={task} participants={participants} runs={runs} />
+            <GripVertical className="drag-handle" size={16} />
+          </button>
+        ))}
+      </div>
+    </section>
+  )
+}
 
-      <nav className="tabs">
-        <button className={activeTab === 'board' ? 'active' : ''} onClick={() => setActiveTab('board')}>
-          <LayoutDashboard size={16} />
-          {t.boardTab}
-        </button>
-        <button className={activeTab === 'project' ? 'active' : ''} onClick={() => setActiveTab('project')}>
-          <Settings size={16} />
-          {t.projectTab}
-        </button>
-        <button className={activeTab === 'agents' ? 'active' : ''} onClick={() => setActiveTab('agents')}>
-          <Bot size={16} />
-          {t.agentsTab}
-        </button>
-      </nav>
-
-      {activeTab === 'board' && (
-        <section className="board-layout">
-          <div className="board-scroll">
-            {columns.map(column => (
-              <KanbanColumn
-                key={column.id}
-                labels={t}
-                column={column}
-                tasks={tasks.filter(task => task.columnId === column.id)}
-                selectedTaskId={selectedTaskId}
-                agents={state.agents}
-                runs={state.runs}
-                projectAgents={projectAgents}
-                taskDraft={taskDraft}
-                newTaskColumnId={newTaskColumnId}
-                busy={busy}
-                onSelectTask={setSelectedTaskId}
-                onOpenNewTask={() => {
-                  setNewTaskColumnId(column.id)
-                  setTaskDraft({ ...emptyTaskDraft, columnId: column.id })
-                }}
-                onDraftChange={setTaskDraft}
-                onCreateTask={() => createTask(column.id)}
-              />
-            ))}
+function TaskModal({
+  labels: t,
+  locale,
+  task,
+  draft,
+  columns,
+  participants,
+  comments,
+  runs,
+  agents,
+  people,
+  busy,
+  commentDraft,
+  onClose,
+  onDraftChange,
+  onSave,
+  onCommentDraftChange,
+  onAddComment
+}: {
+  labels: Labels
+  locale: Locale
+  task: TaskCard
+  draft: TaskDraft
+  columns: BoardColumn[]
+  participants: Participant[]
+  comments: TaskComment[]
+  runs: Array<{ id: string; status: string; createdAt: string; finishedAt?: string | null; log: string }>
+  agents: AgentProfile[]
+  people: Person[]
+  busy: boolean
+  commentDraft: string
+  onClose: () => void
+  onDraftChange: (draft: TaskDraft) => void
+  onSave: () => void
+  onCommentDraftChange: (value: string) => void
+  onAddComment: () => void
+}) {
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <section className="task-modal" onMouseDown={event => event.stopPropagation()}>
+        <header className="modal-header">
+          <div>
+            <span>{t.taskDetails}</span>
+            <h2>{task.title}</h2>
           </div>
+          <button className="icon-button" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </header>
 
-          <aside className="task-panel">
-            {selectedTask ? (
-              <>
-                <div className="panel-title">
-                  <h2>{selectedTask.title}</h2>
-                  <span>{selectedTaskRuns[0]?.status ?? t.noRuns}</span>
-                </div>
-                <label>
-                  {t.taskTitle}
-                  <input value={taskDraft.title} onChange={event => setTaskDraft({ ...taskDraft, title: event.target.value })} />
-                </label>
-                <label>
-                  {t.description}
-                  <textarea value={taskDraft.description} onChange={event => setTaskDraft({ ...taskDraft, description: event.target.value })} rows={5} />
-                </label>
-                <div className="form-grid two">
-                  <label>
-                    {t.status}
-                    <select value={taskDraft.columnId} onChange={event => setTaskDraft({ ...taskDraft, columnId: event.target.value })}>
-                      {columns.map(column => (
-                        <option key={column.id} value={column.id}>{column.name}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    {t.priority}
-                    <select value={taskDraft.priority} onChange={event => setTaskDraft({ ...taskDraft, priority: event.target.value })}>
-                      <option value="low">{t.priorities.low}</option>
-                      <option value="normal">{t.priorities.normal}</option>
-                      <option value="high">{t.priorities.high}</option>
-                      <option value="urgent">{t.priorities.urgent}</option>
-                    </select>
-                  </label>
-                </div>
-                <div className="form-grid two">
-                  <label>
-                    {t.agent}
-                    <select value={taskDraft.assigneeAgentId} onChange={event => setTaskDraft({ ...taskDraft, assigneeAgentId: event.target.value })}>
-                      <option value="">{t.unassignedAgent}</option>
-                      {projectAgents.map(({ agent }) => (
-                        <option key={agent.id} value={agent.id}>{agent.name}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    {t.taskRole}
-                    <select value={taskDraft.assignmentRole} onChange={event => setTaskDraft({ ...taskDraft, assignmentRole: event.target.value })}>
-                      <option value="worker">worker</option>
-                      <option value="manager">manager</option>
-                      <option value="reviewer">reviewer</option>
-                    </select>
-                  </label>
-                </div>
-                <button className="primary-button full" onClick={saveTask} disabled={busy}>
-                  <Save size={16} />
-                  {t.saveTask}
-                </button>
-
-                <section className="comments">
-                  <h3><MessageSquare size={16} /> {t.comments}</h3>
-                  {selectedTaskComments.map(comment => (
-                    <article key={comment.id} className={`comment ${comment.authorType}`}>
-                      <div>
-                        <strong>{authorLabel(comment.authorType, comment.authorId, state.agents, state.people)}</strong>
-                        <span>{formatDate(comment.createdAt, locale)}</span>
-                      </div>
-                      <p>{comment.body}</p>
-                    </article>
-                  ))}
-                  <textarea value={commentDraft} onChange={event => setCommentDraft(event.target.value)} rows={4} placeholder={t.commentPlaceholder} />
-                  <button className="secondary-button full" onClick={addComment} disabled={busy}>
-                    <MessageSquare size={16} />
-                    {t.send}
-                  </button>
-                </section>
-              </>
-            ) : (
-              <div className="empty-panel">
-                <CheckCircle2 size={22} />
-                <span>{t.selectTask}</span>
-              </div>
-            )}
-          </aside>
-        </section>
-      )}
-
-      {activeTab === 'project' && (
-        <section className="settings-grid">
-          <Panel title={t.columns} icon={<LayoutDashboard size={17} />}>
-            <div className="row-list">
-              {columns.map(column => (
-                <div className="settings-row" key={column.id}>
-                  <input defaultValue={column.name} onBlur={event => {
-                    if (event.currentTarget.value.trim() !== column.name) {
-                      mutate(patchJson(`/api/columns/${column.id}`, { name: event.currentTarget.value }))
-                    }
-                  }} />
-                  <input className="color-input" type="color" value={column.color} onChange={event => mutate(patchJson(`/api/columns/${column.id}`, { color: event.target.value }))} />
-                  <button className="icon-button compact" title={t.deleteColumnTitle} onClick={() => mutate(deleteJson(`/api/columns/${column.id}`))}>
-                    <Trash2 size={15} />
-                  </button>
-                </div>
-              ))}
-              <div className="settings-row">
-                <input value={columnDraft.name} onChange={event => setColumnDraft({ ...columnDraft, name: event.target.value })} placeholder={t.newColumnPlaceholder} />
-                <input className="color-input" type="color" value={columnDraft.color} onChange={event => setColumnDraft({ ...columnDraft, color: event.target.value })} />
-                <button className="icon-button compact" title={t.addColumnTitle} onClick={() => {
-                  mutate(postJson(`/api/projects/${activeProject.id}/columns`, columnDraft))
-                  setColumnDraft({ name: '', color: '#2563eb' })
-                }}>
-                  <Plus size={15} />
-                </button>
-              </div>
-            </div>
-          </Panel>
-
-          <Panel title={t.access} icon={<Users size={17} />}>
-            <div className="row-list">
-              {state.members.filter(member => member.projectId === activeProject.id).map(member => {
-                const person = state.people.find(item => item.id === member.personId)
-                return (
-                  <div className="person-row" key={member.id}>
-                    <Avatar name={person?.displayName ?? member.personId} url={person?.avatarUrl} />
-                    <span>{person?.displayName ?? member.personId}</span>
-                    <span className="muted">{member.role}</span>
-                    <button className="icon-button compact" title={t.removeAccessTitle} onClick={() => mutate(deleteJson(`/api/members/${member.id}`))}>
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                )
-              })}
-              <div className="stack-form">
-                <input value={memberDraft.displayName} onChange={event => setMemberDraft({ ...memberDraft, displayName: event.target.value })} placeholder={t.personNamePlaceholder} />
-                <input value={memberDraft.email} onChange={event => setMemberDraft({ ...memberDraft, email: event.target.value })} placeholder="email" />
-                <input value={memberDraft.avatarUrl} onChange={event => setMemberDraft({ ...memberDraft, avatarUrl: event.target.value })} placeholder="avatar URL" />
-                <select value={memberDraft.role} onChange={event => setMemberDraft({ ...memberDraft, role: event.target.value })}>
-                  <option value="viewer">viewer</option>
-                  <option value="editor">editor</option>
-                  <option value="owner">owner</option>
-                </select>
-                <button className="secondary-button" onClick={() => {
-                  mutate(postJson(`/api/projects/${activeProject.id}/members`, memberDraft))
-                  setMemberDraft({ displayName: '', email: '', avatarUrl: '', role: 'editor' })
-                }}>
-                  <Plus size={16} />
-                  {t.add}
-                </button>
-              </div>
-            </div>
-          </Panel>
-
-          <Panel title={t.repositories} icon={<GitBranch size={17} />}>
-            <div className="row-list">
-              {state.repositories.filter(repo => repo.projectId === activeProject.id).map(repo => (
-                <div className="repo-row" key={repo.id}>
-                  <strong>{repo.name}</strong>
-                  <span>{repo.url}</span>
-                  <em>{repo.branch || repo.authMode}</em>
-                  <button className="icon-button compact" title={t.deleteRepositoryTitle} onClick={() => mutate(deleteJson(`/api/repositories/${repo.id}`))}>
-                    <Trash2 size={15} />
-                  </button>
-                </div>
-              ))}
-              <div className="stack-form">
-                <input value={repoDraft.name} onChange={event => setRepoDraft({ ...repoDraft, name: event.target.value })} placeholder={t.repositoryNamePlaceholder} />
-                <input value={repoDraft.url} onChange={event => setRepoDraft({ ...repoDraft, url: event.target.value })} placeholder={t.repositoryUrlPlaceholder} />
-                <input value={repoDraft.branch} onChange={event => setRepoDraft({ ...repoDraft, branch: event.target.value })} placeholder="branch" />
-                <select value={repoDraft.authMode} onChange={event => setRepoDraft({ ...repoDraft, authMode: event.target.value })}>
-                  <option value="http">http</option>
-                  <option value="ssh">ssh</option>
-                </select>
-                <button className="secondary-button" onClick={() => {
-                  mutate(postJson(`/api/projects/${activeProject.id}/repositories`, repoDraft))
-                  setRepoDraft({ name: '', url: '', branch: '', authMode: 'http' })
-                }}>
-                  <Plus size={16} />
-                  {t.add}
-                </button>
-              </div>
-            </div>
-          </Panel>
-
-          <Panel title={t.projectAgents} icon={<Bot size={17} />}>
-            <div className="row-list">
-              {projectAgents.map(({ link, agent }) => (
-                <div className="agent-access-row" key={link.id}>
-                  <Avatar name={agent.name} url={agent.avatarUrl} />
-                  <span>{agent.name}</span>
-                  <select value={link.role} onChange={event => mutate(patchJson(`/api/project-agents/${link.id}`, { role: event.target.value }))}>
-                    <option value="worker">worker</option>
-                    <option value="reviewer">reviewer</option>
-                    <option value="manager">manager</option>
-                    <option value="observer">observer</option>
-                  </select>
-                  <button className="icon-button compact" title={t.removeAgentTitle} onClick={() => mutate(deleteJson(`/api/project-agents/${link.id}`))}>
-                    <Trash2 size={15} />
-                  </button>
-                </div>
-              ))}
-              <div className="settings-row">
-                <select value={projectAgentDraft.agentId} onChange={event => setProjectAgentDraft({ ...projectAgentDraft, agentId: event.target.value })}>
-                  <option value="">{t.selectAgent}</option>
-                  {unlinkedAgents.map(agent => (
-                    <option key={agent.id} value={agent.id}>{agent.name}</option>
+        <div className="task-modal-body">
+          <div className="task-edit">
+            <label>
+              {t.title}
+              <input value={draft.title} onChange={event => onDraftChange({ ...draft, title: event.target.value })} />
+            </label>
+            <label>
+              {t.description}
+              <textarea value={draft.description} onChange={event => onDraftChange({ ...draft, description: event.target.value })} rows={6} />
+            </label>
+            <div className="form-grid two">
+              <label>
+                {t.status}
+                <select value={draft.columnId} onChange={event => onDraftChange({ ...draft, columnId: event.target.value })}>
+                  {columns.map(column => (
+                    <option key={column.id} value={column.id}>{column.name}</option>
                   ))}
                 </select>
-                <select value={projectAgentDraft.role} onChange={event => setProjectAgentDraft({ ...projectAgentDraft, role: event.target.value })}>
+              </label>
+              <label>
+                {t.priority}
+                <select value={draft.priority} onChange={event => onDraftChange({ ...draft, priority: event.target.value })}>
+                  <option value="low">{t.priorities.low}</option>
+                  <option value="normal">{t.priorities.normal}</option>
+                  <option value="high">{t.priorities.high}</option>
+                  <option value="urgent">{t.priorities.urgent}</option>
+                </select>
+              </label>
+            </div>
+            <div className="form-grid two">
+              <label>
+                {t.assignee}
+                <select value={draft.assigneeId} onChange={event => onDraftChange({ ...draft, assigneeId: event.target.value })}>
+                  <option value="">{t.noAssignee}</option>
+                  {participants.map(participant => (
+                    <option key={participant.key} value={participant.key}>{participant.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                {t.taskRole}
+                <select value={draft.assignmentRole} onChange={event => onDraftChange({ ...draft, assignmentRole: event.target.value })}>
                   <option value="worker">worker</option>
                   <option value="reviewer">reviewer</option>
                   <option value="manager">manager</option>
                   <option value="observer">observer</option>
                 </select>
-                <button className="icon-button compact" title={t.addAgentTitle} onClick={() => mutate(postJson(`/api/projects/${activeProject.id}/agents`, projectAgentDraft))}>
-                  <Plus size={15} />
+              </label>
+            </div>
+            <button className="primary-button" onClick={onSave} disabled={busy}>
+              <Save size={16} />
+              {t.saveTask}
+            </button>
+          </div>
+
+          <aside className="conversation-panel">
+            <section className="comments">
+              <h3><MessageSquare size={16} />{t.comments}</h3>
+              {comments.map(comment => (
+                <article className={`comment ${comment.authorType}`} key={comment.id}>
+                  <div>
+                    <AuthorBadge comment={comment} agents={agents} people={people} labels={t} />
+                    <time>{formatDate(comment.createdAt, locale)}</time>
+                  </div>
+                  <p>{comment.body}</p>
+                </article>
+              ))}
+              <div className="comment-form">
+                <textarea value={commentDraft} onChange={event => onCommentDraftChange(event.target.value)} placeholder={t.commentPlaceholder} rows={3} />
+                <button className="secondary-button" onClick={onAddComment} disabled={busy}>
+                  <MessageSquare size={16} />
+                  {t.send}
                 </button>
               </div>
+            </section>
+            <section className="runs-panel">
+              <h3><CheckCircle2 size={16} />{t.runs}</h3>
+              {runs.length === 0 && <p className="muted">{t.noRuns}</p>}
+              {runs.slice(0, 4).map(run => (
+                <div className="run-row" key={run.id}>
+                  <strong>{run.status}</strong>
+                  <span>{formatDate(run.finishedAt || run.createdAt, locale)}</span>
+                </div>
+              ))}
+            </section>
+          </aside>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function ProjectsPage({
+  labels: t,
+  state,
+  activeProject,
+  projects,
+  participants,
+  unlinkedAgents,
+  projectDraft,
+  projectEditDraft,
+  columnDraft,
+  participantDraft,
+  repoDraft,
+  busy,
+  onSelectProject,
+  onProjectDraftChange,
+  onProjectEditDraftChange,
+  onCreateProject,
+  onSaveProject,
+  onColumnDraftChange,
+  onAddColumn,
+  onDeleteColumn,
+  onParticipantDraftChange,
+  onAddParticipant,
+  onUpdateParticipantRole,
+  onRemoveParticipant,
+  onRepoDraftChange,
+  onAddRepository,
+  onDeleteRepository
+}: {
+  labels: Labels
+  state: KanitelState
+  activeProject?: Project
+  projects: Project[]
+  participants: Participant[]
+  unlinkedAgents: AgentProfile[]
+  projectDraft: { name: string; description: string }
+  projectEditDraft: { name: string; description: string }
+  columnDraft: { name: string; color: string }
+  participantDraft: ParticipantDraft
+  repoDraft: { name: string; url: string; branch: string; authMode: string }
+  busy: boolean
+  onSelectProject: (id: string) => void
+  onProjectDraftChange: (draft: { name: string; description: string }) => void
+  onProjectEditDraftChange: (draft: { name: string; description: string }) => void
+  onCreateProject: () => void
+  onSaveProject: () => void
+  onColumnDraftChange: (draft: { name: string; color: string }) => void
+  onAddColumn: () => void
+  onDeleteColumn: (columnId: string) => void
+  onParticipantDraftChange: (draft: ParticipantDraft) => void
+  onAddParticipant: () => void
+  onUpdateParticipantRole: (participant: Participant, role: string) => void
+  onRemoveParticipant: (participant: Participant) => void
+  onRepoDraftChange: (draft: { name: string; url: string; branch: string; authMode: string }) => void
+  onAddRepository: () => void
+  onDeleteRepository: (repoId: string) => void
+}) {
+  const columns = activeProject ? state.columns.filter(column => column.projectId === activeProject.id).sort((a, b) => a.position - b.position) : []
+  const repositories = activeProject ? state.repositories.filter(repo => repo.projectId === activeProject.id) : []
+
+  return (
+    <section className="projects-page">
+      <aside className="project-list">
+        <div className="page-heading compact">
+          <h2>{t.navProjects}</h2>
+          <span>{projects.length}</span>
+        </div>
+        {projects.map(project => (
+          <button key={project.id} className={activeProject?.id === project.id ? 'project-card active' : 'project-card'} onClick={() => onSelectProject(project.id)}>
+            <strong>{project.name}</strong>
+            <span>{project.description || t.noDescription}</span>
+          </button>
+        ))}
+        <Panel title={t.newProject} icon={<Plus size={17} />}>
+          <div className="stack-form">
+            <input value={projectDraft.name} onChange={event => onProjectDraftChange({ ...projectDraft, name: event.target.value })} placeholder={t.projectName} />
+            <textarea value={projectDraft.description} onChange={event => onProjectDraftChange({ ...projectDraft, description: event.target.value })} placeholder={t.description} rows={3} />
+            <button className="primary-button full" onClick={onCreateProject} disabled={busy}>
+              <Plus size={16} />
+              {t.create}
+            </button>
+          </div>
+        </Panel>
+      </aside>
+
+      {activeProject && (
+        <div className="project-settings">
+          <Panel title={t.activeProject} icon={<Folder size={17} />}>
+            <div className="form-grid two">
+              <input value={projectEditDraft.name} onChange={event => onProjectEditDraftChange({ ...projectEditDraft, name: event.target.value })} placeholder={t.projectName} />
+              <input value={projectEditDraft.description} onChange={event => onProjectEditDraftChange({ ...projectEditDraft, description: event.target.value })} placeholder={t.description} />
+            </div>
+            <div className="button-row">
+              <button className="primary-button" onClick={onSaveProject} disabled={busy}>
+                <Save size={16} />
+                {t.save}
+              </button>
             </div>
           </Panel>
-        </section>
-      )}
 
-      {activeTab === 'agents' && (
+          <div className="settings-grid">
+            <Panel title={t.columns} icon={<LayoutDashboard size={17} />}>
+              <div className="row-list">
+                {columns.map(column => (
+                  <div className="settings-row" key={column.id}>
+                    <span className="color-dot" style={{ background: column.color }} />
+                    <strong>{column.name}</strong>
+                    <button className="icon-button compact" title={t.deleteColumn} onClick={() => onDeleteColumn(column.id)}>
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                ))}
+                <div className="settings-row add-row">
+                  <input value={columnDraft.name} onChange={event => onColumnDraftChange({ ...columnDraft, name: event.target.value })} placeholder={t.columnName} />
+                  <input className="color-input" type="color" value={columnDraft.color} onChange={event => onColumnDraftChange({ ...columnDraft, color: event.target.value })} />
+                  <button className="icon-button compact" title={t.addColumn} onClick={onAddColumn}>
+                    <Plus size={15} />
+                  </button>
+                </div>
+              </div>
+            </Panel>
+
+            <Panel title={t.participants} icon={<Users size={17} />}>
+              <div className="row-list">
+                {participants.map(participant => (
+                  <div className="participant-row" key={participant.key}>
+                    <Avatar name={participant.name} url={participant.avatarUrl} />
+                    <span>
+                      <strong>{participant.name}</strong>
+                      <em>{participant.kind === 'agent' ? t.agent : participant.email || t.person}</em>
+                    </span>
+                    <select value={participant.role} onChange={event => onUpdateParticipantRole(participant, event.target.value)}>
+                      {roleOptions.map(role => (
+                        <option key={role} value={role}>{role}</option>
+                      ))}
+                    </select>
+                    <button className="icon-button compact" title={t.remove} onClick={() => onRemoveParticipant(participant)}>
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                ))}
+                <div className="participant-form">
+                  <select value={participantDraft.kind} onChange={event => onParticipantDraftChange({ ...participantDraft, kind: event.target.value as ParticipantKind })}>
+                    <option value="person">{t.person}</option>
+                    <option value="agent">{t.agent}</option>
+                  </select>
+                  {participantDraft.kind === 'person' ? (
+                    <>
+                      <select value={participantDraft.personId} onChange={event => onParticipantDraftChange({ ...participantDraft, personId: event.target.value })}>
+                        <option value="">{t.selectPerson}</option>
+                        {state.people.map(person => (
+                          <option key={person.id} value={person.id}>{person.displayName}</option>
+                        ))}
+                      </select>
+                      <input value={participantDraft.displayName} onChange={event => onParticipantDraftChange({ ...participantDraft, displayName: event.target.value })} placeholder={t.displayName} />
+                      <input value={participantDraft.email} onChange={event => onParticipantDraftChange({ ...participantDraft, email: event.target.value })} placeholder={t.email} />
+                    </>
+                  ) : (
+                    <select value={participantDraft.agentId} onChange={event => onParticipantDraftChange({ ...participantDraft, agentId: event.target.value })}>
+                      <option value="">{t.selectAgent}</option>
+                      {unlinkedAgents.map(agent => (
+                        <option key={agent.id} value={agent.id}>{agent.name}</option>
+                      ))}
+                    </select>
+                  )}
+                  <select value={participantDraft.role} onChange={event => onParticipantDraftChange({ ...participantDraft, role: event.target.value })}>
+                    {roleOptions.map(role => (
+                      <option key={role} value={role}>{role}</option>
+                    ))}
+                  </select>
+                  <button className="secondary-button" onClick={onAddParticipant} disabled={busy}>
+                    <UserPlus size={16} />
+                    {t.addParticipant}
+                  </button>
+                </div>
+              </div>
+            </Panel>
+
+            <Panel title={t.repositories} icon={<GitBranch size={17} />}>
+              <div className="row-list">
+                {repositories.map(repo => (
+                  <div className="repo-row" key={repo.id}>
+                    <strong>{repo.name}</strong>
+                    <span>{repo.url}</span>
+                    <em>{repo.branch || repo.authMode}</em>
+                    <button className="icon-button compact" title={t.deleteRepository} onClick={() => onDeleteRepository(repo.id)}>
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                ))}
+                <div className="stack-form">
+                  <input value={repoDraft.name} onChange={event => onRepoDraftChange({ ...repoDraft, name: event.target.value })} placeholder={t.repositoryName} />
+                  <input value={repoDraft.url} onChange={event => onRepoDraftChange({ ...repoDraft, url: event.target.value })} placeholder={t.repositoryUrl} />
+                  <div className="form-grid two">
+                    <input value={repoDraft.branch} onChange={event => onRepoDraftChange({ ...repoDraft, branch: event.target.value })} placeholder={t.branch} />
+                    <select value={repoDraft.authMode} onChange={event => onRepoDraftChange({ ...repoDraft, authMode: event.target.value })}>
+                      <option value="http">http</option>
+                      <option value="ssh">ssh</option>
+                    </select>
+                  </div>
+                  <button className="secondary-button" onClick={onAddRepository} disabled={busy}>
+                    <Plus size={16} />
+                    {t.create}
+                  </button>
+                </div>
+              </div>
+            </Panel>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function SettingsPage({
+  labels: t,
+  theme,
+  locale,
+  profileDraft,
+  agents,
+  selectedAgentId,
+  selectedAgent,
+  agentDraft,
+  presets,
+  templates,
+  busy,
+  onThemeChange,
+  onLocaleChange,
+  onProfileDraftChange,
+  onSaveProfile,
+  onSelectAgent,
+  onNewAgent,
+  onAgentDraftChange,
+  onPreset,
+  onTemplate,
+  onCreateAgent,
+  onSaveAgent
+}: {
+  labels: Labels
+  theme: Theme
+  locale: Locale
+  profileDraft: ProfileDraft
+  agents: AgentProfile[]
+  selectedAgentId: string
+  selectedAgent?: AgentProfile
+  agentDraft: AgentDraft
+  presets: ProviderPreset[]
+  templates: AgentTemplate[]
+  busy: boolean
+  onThemeChange: (theme: Theme) => void
+  onLocaleChange: (locale: Locale) => void
+  onProfileDraftChange: (draft: ProfileDraft) => void
+  onSaveProfile: () => void
+  onSelectAgent: (id: string) => void
+  onNewAgent: () => void
+  onAgentDraftChange: (draft: AgentDraft) => void
+  onPreset: (presetId: string) => void
+  onTemplate: (templateId: string) => void
+  onCreateAgent: () => void
+  onSaveAgent: () => void
+}) {
+  return (
+    <section className="settings-page">
+      <div className="settings-grid top">
+        <Panel title={t.profile} icon={<Users size={17} />}>
+          <div className="form-grid two">
+            <label>
+              {t.displayName}
+              <input value={profileDraft.displayName} onChange={event => onProfileDraftChange({ ...profileDraft, displayName: event.target.value })} />
+            </label>
+            <label>
+              {t.email}
+              <input value={profileDraft.email} onChange={event => onProfileDraftChange({ ...profileDraft, email: event.target.value })} />
+            </label>
+          </div>
+          <label>
+            {t.avatarUrl}
+            <input value={profileDraft.avatarUrl} onChange={event => onProfileDraftChange({ ...profileDraft, avatarUrl: event.target.value })} />
+          </label>
+          <label>
+            {t.password}
+            <input type="password" value={profileDraft.password} onChange={event => onProfileDraftChange({ ...profileDraft, password: event.target.value })} />
+          </label>
+          <button className="primary-button" onClick={onSaveProfile} disabled={busy}>
+            <Save size={16} />
+            {t.save}
+          </button>
+        </Panel>
+
+        <Panel title={t.appearance} icon={<Settings size={17} />}>
+          <div className="settings-row">
+            <strong>{t.theme}</strong>
+            <button className={theme === 'light' ? 'pill active' : 'pill'} onClick={() => onThemeChange('light')}>{t.lightThemeTitle}</button>
+            <button className={theme === 'dark' ? 'pill active' : 'pill'} onClick={() => onThemeChange('dark')}>{t.darkThemeTitle}</button>
+          </div>
+          <div className="settings-row">
+            <strong>{t.language}</strong>
+            <button className={locale === 'ru' ? 'pill active' : 'pill'} onClick={() => onLocaleChange('ru')}>Русский</button>
+            <button className={locale === 'en' ? 'pill active' : 'pill'} onClick={() => onLocaleChange('en')}>English</button>
+          </div>
+        </Panel>
+      </div>
+
+      <Panel title={t.globalAgents} icon={<Bot size={17} />}>
         <section className="agents-layout">
           <div className="agent-list">
-            {state.agents.map(agent => (
-              <button key={agent.id} className={selectedAgentId === agent.id ? 'agent-item active' : 'agent-item'} onClick={() => setSelectedAgentId(agent.id)}>
+            {agents.map(agent => (
+              <button key={agent.id} className={selectedAgentId === agent.id ? 'agent-item active' : 'agent-item'} onClick={() => onSelectAgent(agent.id)}>
                 <Avatar name={agent.name} url={agent.avatarUrl} />
                 <span>
                   <strong>{agent.name}</strong>
@@ -788,10 +1618,7 @@ export default function App() {
           <div className="agent-editor">
             <div className="panel-title">
               <h2>{selectedAgent ? t.agentProfile : t.newAgent}</h2>
-              <button className="secondary-button" onClick={() => {
-                setSelectedAgentId('')
-                setAgentDraft(initialAgentDraft(bootstrap.providerPresets[0], bootstrap.agentTemplates[0]))
-              }}>
+              <button className="secondary-button" onClick={onNewAgent}>
                 <Plus size={16} />
                 {t.newButton}
               </button>
@@ -799,20 +1626,20 @@ export default function App() {
             <AgentForm
               labels={t}
               draft={agentDraft}
-              presets={bootstrap.providerPresets}
-              templates={bootstrap.agentTemplates}
-              onChange={setAgentDraft}
-              onPreset={applyPresetToDraft}
-              onTemplate={applyTemplateToDraft}
+              presets={presets}
+              templates={templates}
+              onChange={onAgentDraftChange}
+              onPreset={onPreset}
+              onTemplate={onTemplate}
             />
             <div className="button-row">
               {selectedAgent ? (
-                <button className="primary-button" onClick={saveAgent} disabled={busy}>
+                <button className="primary-button" onClick={onSaveAgent} disabled={busy}>
                   <Save size={16} />
                   {t.save}
                 </button>
               ) : (
-                <button className="primary-button" onClick={createAgent} disabled={busy}>
+                <button className="primary-button" onClick={onCreateAgent} disabled={busy}>
                   <Plus size={16} />
                   {t.create}
                 </button>
@@ -820,104 +1647,7 @@ export default function App() {
             </div>
           </div>
         </section>
-      )}
-    </main>
-  )
-}
-
-function KanbanColumn({
-  labels: t,
-  column,
-  tasks,
-  selectedTaskId,
-  agents,
-  runs,
-  projectAgents,
-  taskDraft,
-  newTaskColumnId,
-  busy,
-  onSelectTask,
-  onOpenNewTask,
-  onDraftChange,
-  onCreateTask
-}: {
-  labels: Labels
-  column: BoardColumn
-  tasks: TaskCard[]
-  selectedTaskId: string
-  agents: AgentProfile[]
-  runs: Array<{ taskId: string; status: string; createdAt: string }>
-  projectAgents: Array<{ link: ProjectAgent; agent: AgentProfile }>
-  taskDraft: TaskDraft
-  newTaskColumnId: string
-  busy: boolean
-  onSelectTask: (id: string) => void
-  onOpenNewTask: () => void
-  onDraftChange: (draft: TaskDraft) => void
-  onCreateTask: () => void
-}) {
-  return (
-    <section className="column">
-      <header className="column-header" style={{ borderTopColor: column.color }}>
-        <div>
-          <h2>{column.name}</h2>
-          <span>{tasks.length}{column.wipLimit ? ` / ${column.wipLimit}` : ''}</span>
-        </div>
-        <button className="icon-button compact" title={t.addTaskTitle} onClick={onOpenNewTask}>
-          <Plus size={16} />
-        </button>
-      </header>
-
-      {newTaskColumnId === column.id && (
-        <div className="inline-form">
-          <input value={taskDraft.title} onChange={event => onDraftChange({ ...taskDraft, title: event.target.value })} placeholder={t.titlePlaceholder} />
-          <textarea value={taskDraft.description} onChange={event => onDraftChange({ ...taskDraft, description: event.target.value })} placeholder={t.descriptionPlaceholder} rows={3} />
-          <div className="form-grid two">
-            <select value={taskDraft.assigneeAgentId} onChange={event => onDraftChange({ ...taskDraft, assigneeAgentId: event.target.value })}>
-              <option value="">{t.noAgentOption}</option>
-              {projectAgents.map(({ agent }) => (
-                <option key={agent.id} value={agent.id}>{agent.name}</option>
-              ))}
-            </select>
-            <select value={taskDraft.assignmentRole} onChange={event => onDraftChange({ ...taskDraft, assignmentRole: event.target.value })}>
-              <option value="worker">worker</option>
-              <option value="manager">manager</option>
-              <option value="reviewer">reviewer</option>
-            </select>
-          </div>
-          <button className="primary-button" onClick={onCreateTask} disabled={busy}>
-            <Plus size={16} />
-            {t.add}
-          </button>
-        </div>
-      )}
-
-      <div className="task-list">
-        {tasks.map(task => (
-          <button
-            key={task.id}
-            className={`task-card ${selectedTaskId === task.id ? 'selected' : ''}`}
-            onClick={() => onSelectTask(task.id)}
-          >
-            <span className={`priority ${task.priority}`}>{priorityLabel(task.priority, t)}</span>
-            <strong>{task.title}</strong>
-            <span className="task-description">{task.description || t.noDescription}</span>
-            <TaskMeta labels={t} task={task} agents={agents} runs={runs} />
-          </button>
-        ))}
-      </div>
-    </section>
-  )
-}
-
-function Panel({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {
-  return (
-    <section className="settings-panel">
-      <header>
-        {icon}
-        <h2>{title}</h2>
-      </header>
-      {children}
+      </Panel>
     </section>
   )
 }
@@ -1007,6 +1737,18 @@ function AgentForm({
   )
 }
 
+function Panel({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {
+  return (
+    <section className="settings-panel">
+      <header>
+        {icon}
+        <h2>{title}</h2>
+      </header>
+      {children}
+    </section>
+  )
+}
+
 function Avatar({ name, url }: { name: string; url?: string | null }) {
   if (url) {
     return <img className="avatar" src={url} alt="" />
@@ -1026,18 +1768,86 @@ function Avatar({ name, url }: { name: string; url?: string | null }) {
   )
 }
 
-function TaskMeta({ labels: t, task, agents, runs }: { labels: Labels; task: TaskCard; agents: AgentProfile[]; runs: Array<{ taskId: string; status: string; createdAt: string }> }) {
-  const agent = agents.find(item => item.id === task.assigneeAgentId)
+function TaskMeta({ labels: t, task, participants, runs }: { labels: Labels; task: TaskCard; participants: Participant[]; runs: Array<{ taskId: string; status: string; createdAt: string }> }) {
+  const participant = participants.find(item => item.key === assigneeValue(task))
   const run = runs
     .filter(item => item.taskId === task.id)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
   return (
     <span className="task-meta">
-      <span><Bot size={13} /> {agent?.name ?? t.noAgentMeta}</span>
-      <span>{task.assigneeAgentId ? task.assignmentRole : t.unassigned}</span>
+      <span>{participant?.kind === 'agent' ? <Bot size={13} /> : <Users size={13} />} {participant?.name ?? t.noAssignee}</span>
+      <span>{task.assignmentRole}</span>
       <span>{run?.status ?? t.noRuns}</span>
     </span>
   )
+}
+
+function AuthorBadge({ comment, agents, people, labels: t }: { comment: TaskComment; agents: AgentProfile[]; people: Person[]; labels: Labels }) {
+  const agent = comment.authorType === 'agent'
+    ? agents.find(item => item.id === comment.authorId)
+    : undefined
+  const person = comment.authorType === 'person'
+    ? people.find(item => item.id === comment.authorId)
+    : undefined
+  const authorName = agent?.name ?? person?.displayName ?? t.system
+  const avatarUrl = agent?.avatarUrl ?? person?.avatarUrl
+  return (
+    <span className="author-badge">
+      <Avatar name={authorName} url={avatarUrl} />
+      <strong>{authorName}</strong>
+    </span>
+  )
+}
+
+function buildParticipants(state: KanitelState, projectId: string): Participant[] {
+  const participants: Participant[] = []
+
+  for (const member of state.members.filter(item => item.projectId === projectId)) {
+    const person = state.people.find(item => item.id === member.personId)
+    if (!person) continue
+    participants.push({
+      key: `person:${person.id}`,
+      kind: 'person',
+      id: person.id,
+      linkId: member.id,
+      name: person.displayName,
+      email: person.email,
+      avatarUrl: person.avatarUrl,
+      role: member.role
+    })
+  }
+
+  for (const link of state.projectAgents.filter(item => item.projectId === projectId)) {
+    const agent = state.agents.find(item => item.id === link.agentId)
+    if (!agent) continue
+    participants.push({
+      key: `agent:${agent.id}`,
+      kind: 'agent',
+      id: agent.id,
+      linkId: link.id,
+      name: agent.name,
+      avatarUrl: agent.avatarUrl,
+      role: link.role
+    })
+  }
+
+  return participants.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+function assigneeValue(task: TaskCard) {
+  if (task.assigneeAgentId) return `agent:${task.assigneeAgentId}`
+  if (task.assigneePersonId) return `person:${task.assigneePersonId}`
+  return ''
+}
+
+function splitAssignee(value: string) {
+  if (value.startsWith('agent:')) {
+    return { assigneeAgentId: value.slice('agent:'.length), assigneePersonId: '' }
+  }
+  if (value.startsWith('person:')) {
+    return { assigneeAgentId: '', assigneePersonId: value.slice('person:'.length) }
+  }
+  return { assigneeAgentId: '', assigneePersonId: '' }
 }
 
 function initialAgentDraft(preset?: ProviderPreset, template?: AgentTemplate): AgentDraft {
@@ -1077,6 +1887,45 @@ function initialAgentDraft(preset?: ProviderPreset, template?: AgentTemplate): A
   }
 }
 
+function agentPayload(draft: AgentDraft) {
+  return {
+    name: draft.name,
+    templateId: draft.templateId,
+    avatarUrl: draft.avatarUrl,
+    providerPresetId: draft.providerPresetId,
+    model: draft.model,
+    baseUrl: draft.baseUrl,
+    apiKeyEnvName: draft.apiKeyEnvName,
+    containerImage: draft.containerImage,
+    commandTemplate: draft.commandTemplate,
+    systemPrompt: draft.systemPrompt,
+    enabled: draft.enabled,
+    environment: parseEnvText(draft.environmentText)
+  }
+}
+
+async function postProfile(profileDraft: ProfileDraft) {
+  return patchJson<AuthResponse>('/api/auth/me', {
+    displayName: profileDraft.displayName,
+    email: profileDraft.email,
+    avatarUrl: profileDraft.avatarUrl,
+    password: profileDraft.password
+  })
+}
+
+function emptyProfileDraft(): ProfileDraft {
+  return { displayName: '', email: '', avatarUrl: '', password: '' }
+}
+
+function toProfileDraft(person: Person): ProfileDraft {
+  return {
+    displayName: person.displayName,
+    email: person.email,
+    avatarUrl: person.avatarUrl,
+    password: ''
+  }
+}
+
 function parseEnvText(value: string): Record<string, string> {
   return Object.fromEntries(
     value
@@ -1104,16 +1953,6 @@ function priorityLabel(priority: string, t: Labels) {
   return priority
 }
 
-function authorLabel(authorType: string, authorId: string, agents: AgentProfile[], people: Person[]) {
-  if (authorType === 'agent') {
-    return agents.find(agent => agent.id === authorId)?.name ?? authorId
-  }
-  if (authorType === 'person') {
-    return people.find(person => person.id === authorId)?.displayName ?? authorId
-  }
-  return authorType
-}
-
 function formatDate(value: string, locale: Locale) {
   return new Intl.DateTimeFormat(locale === 'ru' ? 'ru-RU' : 'en-US', {
     day: '2-digit',
@@ -1126,7 +1965,7 @@ function formatDate(value: string, locale: Locale) {
 function readTheme(): Theme {
   const stored = window.localStorage.getItem('kanitel-theme')
   if (stored === 'light' || stored === 'dark') return stored
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  return 'light'
 }
 
 function readLocale(): Locale {
@@ -1134,3 +1973,5 @@ function readLocale(): Locale {
   if (stored === 'ru' || stored === 'en') return stored
   return window.navigator.language.toLowerCase().startsWith('ru') ? 'ru' : 'en'
 }
+
+const roleOptions = ['viewer', 'editor', 'worker', 'reviewer', 'manager', 'owner']

@@ -102,6 +102,7 @@ public sealed class JsonDataStore
     private static void Normalize(KanitelState state)
     {
         state.Projects ??= [];
+        state.Accounts ??= [];
         state.Columns ??= [];
         state.People ??= [];
         state.Members ??= [];
@@ -130,6 +131,14 @@ public sealed class JsonDataStore
         foreach (var person in state.People)
         {
             person.AvatarUrl ??= "";
+        }
+
+        foreach (var account in state.Accounts)
+        {
+            account.Email ??= "";
+            account.PasswordHash ??= "";
+            account.PasswordSalt ??= "";
+            account.SessionToken ??= "";
         }
     }
 

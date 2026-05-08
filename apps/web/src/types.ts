@@ -1,5 +1,6 @@
 export type KanitelState = {
   schemaVersion: string
+  accounts?: unknown[]
   projects: Project[]
   columns: BoardColumn[]
   people: Person[]
@@ -144,10 +145,16 @@ export type AgentTemplate = {
 
 export type BootstrapPayload = {
   state: KanitelState
+  currentUser?: Person | null
   providerPresets: ProviderPreset[]
   agentTemplates: AgentTemplate[]
   scheduler: {
     runner: string
     intervalSeconds: number
   }
+}
+
+export type AuthResponse = {
+  token: string
+  person: Person
 }

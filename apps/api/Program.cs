@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Kanitel.Api;
 
@@ -29,6 +31,10 @@ app.MapGet("/api/openapi.json", () => Results.Ok(new
     endpoints = new object[]
     {
         new { method = "GET", path = "/api/bootstrap", purpose = "Load state, provider presets, agent templates, and scheduler info." },
+        new { method = "POST", path = "/api/auth/register", purpose = "Register a local user and return an API token." },
+        new { method = "POST", path = "/api/auth/login", purpose = "Login and return an API token." },
+        new { method = "GET", path = "/api/auth/me", purpose = "Read the current user profile from the bearer token." },
+        new { method = "PATCH", path = "/api/auth/me", purpose = "Update the current user profile." },
         new { method = "POST", path = "/api/projects", purpose = "Create a project with default columns." },
         new { method = "POST", path = "/api/projects/{projectId}/tasks", purpose = "Create a task card." },
         new { method = "PATCH", path = "/api/tasks/{taskId}", purpose = "Update a task card, assignment, role, priority, or column." },
@@ -41,12 +47,15 @@ app.MapGet("/api/openapi.json", () => Results.Ok(new
     }
 }));
 
-app.MapGet("/api/bootstrap", async (JsonDataStore store, IConfiguration configuration) =>
+app.MapGet("/api/bootstrap", async (JsonDataStore store, IConfiguration configuration, HttpRequest httpRequest) =>
 {
     var state = await store.SnapshotAsync();
+    var currentUser = FindCurrentUser(state, httpRequest);
+    var clientState = SanitizeForClient(state);
     return Results.Ok(new
     {
-        state,
+        state = clientState,
+        currentUser,
         providerPresets = OpenClaudeCatalog.ProviderPresets,
         agentTemplates = OpenClaudeCatalog.AgentTemplates,
         scheduler = new
@@ -55,6 +64,182 @@ app.MapGet("/api/bootstrap", async (JsonDataStore store, IConfiguration configur
             intervalSeconds = ReadInt(configuration, "KANITEL_AGENT_POLL_INTERVAL_SECONDS", 20)
         }
     });
+});
+
+app.MapPost("/api/auth/register", async (JsonDataStore store, AuthRegisterRequest request, CancellationToken cancellationToken) =>
+{
+    if (string.IsNullOrWhiteSpace(request.DisplayName) ||
+        string.IsNullOrWhiteSpace(request.Email) ||
+        string.IsNullOrWhiteSpace(request.Password))
+    {
+        return Results.BadRequest(new { error = "Display name, email, and password are required." });
+    }
+
+    if (request.Password.Length < 6)
+    {
+        return Results.BadRequest(new { error = "Password must be at least 6 characters." });
+    }
+
+    var result = await store.MutateAsync<object?>(state =>
+    {
+        var email = NormalizeEmail(request.Email);
+        var existingAccount = state.Accounts.FirstOrDefault(account =>
+            string.Equals(account.Email, email, StringComparison.OrdinalIgnoreCase));
+        if (existingAccount is not null)
+        {
+            return null;
+        }
+
+        var person = state.People.FirstOrDefault(item =>
+            string.Equals(item.Email, email, StringComparison.OrdinalIgnoreCase));
+        if (person is null)
+        {
+            person = new Person
+            {
+                DisplayName = request.DisplayName.Trim(),
+                Email = email,
+                AvatarUrl = request.AvatarUrl?.Trim() ?? ""
+            };
+            state.People.Add(person);
+        }
+        else
+        {
+            person.DisplayName = request.DisplayName.Trim();
+            person.Email = email;
+            if (request.AvatarUrl is not null)
+            {
+                person.AvatarUrl = request.AvatarUrl.Trim();
+            }
+        }
+
+        var salt = NewToken();
+        var account = new UserAccount
+        {
+            PersonId = person.Id,
+            Email = email,
+            PasswordSalt = salt,
+            PasswordHash = HashPassword(request.Password, salt),
+            SessionToken = NewToken(),
+            LastLoginAt = DateTimeOffset.UtcNow
+        };
+        state.Accounts.Add(account);
+
+        if (state.Accounts.Count == 1 && state.Projects.Count > 0)
+        {
+            var projectId = state.Projects[0].Id;
+            if (state.Members.All(member => member.ProjectId != projectId || member.PersonId != person.Id))
+            {
+                state.Members.Add(new ProjectMember
+                {
+                    ProjectId = projectId,
+                    PersonId = person.Id,
+                    Role = "owner"
+                });
+            }
+        }
+
+        return new AuthResponse(account.SessionToken, person);
+    }, cancellationToken);
+
+    return result is null ? Results.Conflict(new { error = "Account already exists." }) : Results.Ok(result);
+});
+
+app.MapPost("/api/auth/login", async (JsonDataStore store, AuthLoginRequest request, CancellationToken cancellationToken) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
+    {
+        return Results.BadRequest(new { error = "Email and password are required." });
+    }
+
+    var result = await store.MutateAsync<object?>(state =>
+    {
+        var email = NormalizeEmail(request.Email);
+        var account = state.Accounts.FirstOrDefault(item =>
+            string.Equals(item.Email, email, StringComparison.OrdinalIgnoreCase));
+        if (account is null || !VerifyPassword(request.Password, account.PasswordSalt, account.PasswordHash))
+        {
+            return null;
+        }
+
+        account.SessionToken = NewToken();
+        account.LastLoginAt = DateTimeOffset.UtcNow;
+        var person = state.People.FirstOrDefault(item => item.Id == account.PersonId);
+        return person is null ? null : new AuthResponse(account.SessionToken, person);
+    }, cancellationToken);
+
+    return result is null ? Results.Unauthorized() : Results.Ok(result);
+});
+
+app.MapGet("/api/auth/me", async (JsonDataStore store, HttpRequest httpRequest, CancellationToken cancellationToken) =>
+{
+    var state = await store.SnapshotAsync(cancellationToken);
+    var currentUser = FindCurrentUser(state, httpRequest);
+    return currentUser is null ? Results.Unauthorized() : Results.Ok(currentUser);
+});
+
+app.MapPatch("/api/auth/me", async (JsonDataStore store, HttpRequest httpRequest, ProfileRequest request, CancellationToken cancellationToken) =>
+{
+    var token = ReadBearerToken(httpRequest);
+    if (string.IsNullOrWhiteSpace(token))
+    {
+        return Results.Unauthorized();
+    }
+
+    var result = await store.MutateAsync<object?>(state =>
+    {
+        var account = state.Accounts.FirstOrDefault(item => item.SessionToken == token);
+        if (account is null)
+        {
+            return null;
+        }
+
+        var person = state.People.FirstOrDefault(item => item.Id == account.PersonId);
+        if (person is null)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Email))
+        {
+            var email = NormalizeEmail(request.Email);
+            var occupied = state.Accounts.Any(item =>
+                item.Id != account.Id &&
+                string.Equals(item.Email, email, StringComparison.OrdinalIgnoreCase));
+            if (occupied)
+            {
+                return null;
+            }
+
+            person.Email = email;
+            account.Email = email;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.DisplayName))
+        {
+            person.DisplayName = request.DisplayName.Trim();
+        }
+
+        if (request.AvatarUrl is not null)
+        {
+            person.AvatarUrl = request.AvatarUrl.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Password))
+        {
+            if (request.Password.Length < 6)
+            {
+                return null;
+            }
+
+            var salt = NewToken();
+            account.PasswordSalt = salt;
+            account.PasswordHash = HashPassword(request.Password, salt);
+        }
+
+        return new AuthResponse(account.SessionToken, person);
+    }, cancellationToken);
+
+    return result is null ? Results.BadRequest(new { error = "Profile could not be updated." }) : Results.Ok(result);
 });
 
 app.MapPost("/api/scheduler/tick", async (AgentScheduler scheduler, CancellationToken cancellationToken) =>
@@ -300,6 +485,27 @@ app.MapPost("/api/projects/{projectId}/members", async (JsonDataStore store, str
     }, cancellationToken);
 
     return result is null ? Results.BadRequest() : Results.Ok(result);
+});
+
+app.MapPatch("/api/members/{memberId}", async (JsonDataStore store, string memberId, MemberRequest request, CancellationToken cancellationToken) =>
+{
+    var updated = await store.MutateAsync(state =>
+    {
+        var member = state.Members.FirstOrDefault(m => m.Id == memberId);
+        if (member is null)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Role))
+        {
+            member.Role = request.Role.Trim();
+        }
+
+        return member;
+    }, cancellationToken);
+
+    return updated is null ? Results.NotFound() : Results.Ok(updated);
 });
 
 app.MapDelete("/api/members/{memberId}", async (JsonDataStore store, string memberId, CancellationToken cancellationToken) =>
@@ -560,7 +766,7 @@ app.MapPost("/api/projects/{projectId}/tasks", async (JsonDataStore store, strin
         state.Comments.Add(new TaskComment
         {
             TaskId = task.Id,
-            AuthorType = "person",
+            AuthorType = string.IsNullOrWhiteSpace(request.AuthorType) ? "person" : request.AuthorType.Trim(),
             AuthorId = BlankToNull(request.AuthorId) ?? "owner",
             Body = string.IsNullOrWhiteSpace(request.InitialComment)
                 ? "Task created."
@@ -582,6 +788,7 @@ app.MapPatch("/api/tasks/{taskId}", async (JsonDataStore store, string taskId, T
             return null;
         }
 
+        var previousColumnId = task.ColumnId;
         if (!string.IsNullOrWhiteSpace(request.Title)) task.Title = request.Title.Trim();
         if (request.Description is not null) task.Description = request.Description.Trim();
         if (!string.IsNullOrWhiteSpace(request.ColumnId) && state.Columns.Any(c => c.Id == request.ColumnId && c.ProjectId == task.ProjectId))
@@ -592,7 +799,25 @@ app.MapPatch("/api/tasks/{taskId}", async (JsonDataStore store, string taskId, T
         if (request.AssigneePersonId is not null) task.AssigneePersonId = BlankToNull(request.AssigneePersonId);
         if (request.AssignmentRole is not null) task.AssignmentRole = string.IsNullOrWhiteSpace(request.AssignmentRole) ? "worker" : request.AssignmentRole.Trim();
         if (!string.IsNullOrWhiteSpace(request.Priority)) task.Priority = request.Priority.Trim();
-        if (request.Position.HasValue) task.Position = request.Position.Value;
+        if (request.Position.HasValue)
+        {
+            task.Position = Math.Max(0, request.Position.Value);
+        }
+        else if (previousColumnId != task.ColumnId)
+        {
+            task.Position = state.Tasks
+                .Where(t => t.ProjectId == task.ProjectId && t.ColumnId == task.ColumnId && t.Id != task.Id)
+                .Select(t => t.Position)
+                .DefaultIfEmpty(-1)
+                .Max() + 1;
+        }
+
+        if (previousColumnId != task.ColumnId || request.Position.HasValue)
+        {
+            NormalizeTaskPositions(state, task.ProjectId, previousColumnId);
+            NormalizeTaskPositions(state, task.ProjectId, task.ColumnId);
+        }
+
         task.UpdatedAt = DateTimeOffset.UtcNow;
         return task;
     }, cancellationToken);
@@ -781,12 +1006,82 @@ static int ReadInt(IConfiguration configuration, string key, int fallback)
     return int.TryParse(value, out var parsed) && parsed > 0 ? parsed : fallback;
 }
 
+static KanitelState SanitizeForClient(KanitelState state)
+{
+    state.Accounts = [];
+    return state;
+}
+
+static Person? FindCurrentUser(KanitelState state, HttpRequest request)
+{
+    var token = ReadBearerToken(request);
+    if (string.IsNullOrWhiteSpace(token))
+    {
+        return null;
+    }
+
+    var account = state.Accounts.FirstOrDefault(item => item.SessionToken == token);
+    return account is null
+        ? null
+        : state.People.FirstOrDefault(item => item.Id == account.PersonId);
+}
+
+static string? ReadBearerToken(HttpRequest request)
+{
+    var authorization = request.Headers.Authorization.ToString();
+    if (authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+    {
+        return authorization["Bearer ".Length..].Trim();
+    }
+
+    var token = request.Headers["X-Kanitel-Token"].ToString();
+    return string.IsNullOrWhiteSpace(token) ? null : token.Trim();
+}
+
+static string NormalizeEmail(string email)
+{
+    return email.Trim().ToLowerInvariant();
+}
+
+static string NewToken()
+{
+    return Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+}
+
+static string HashPassword(string password, string salt)
+{
+    var bytes = SHA256.HashData(Encoding.UTF8.GetBytes($"{salt}:{password}"));
+    return Convert.ToHexString(bytes).ToLowerInvariant();
+}
+
+static bool VerifyPassword(string password, string salt, string expectedHash)
+{
+    var actual = HashPassword(password, salt);
+    return CryptographicOperations.FixedTimeEquals(
+        Encoding.UTF8.GetBytes(actual),
+        Encoding.UTF8.GetBytes(expectedHash));
+}
+
 static void NormalizeColumnPositions(KanitelState state, string projectId)
 {
     var ordered = state.Columns
         .Where(c => c.ProjectId == projectId)
         .OrderBy(c => c.Position)
         .ThenBy(c => c.Name)
+        .ToList();
+
+    for (var i = 0; i < ordered.Count; i++)
+    {
+        ordered[i].Position = i;
+    }
+}
+
+static void NormalizeTaskPositions(KanitelState state, string projectId, string columnId)
+{
+    var ordered = state.Tasks
+        .Where(task => task.ProjectId == projectId && task.ColumnId == columnId)
+        .OrderBy(task => task.Position)
+        .ThenBy(task => task.UpdatedAt)
         .ToList();
 
     for (var i = 0; i < ordered.Count; i++)
@@ -840,6 +1135,22 @@ static bool CanAgentActOnProject(KanitelState state, string projectId, string ag
 
 public sealed record ProjectRequest(string Name, string? Description);
 
+public sealed record AuthRegisterRequest(
+    string DisplayName,
+    string Email,
+    string Password,
+    string? AvatarUrl);
+
+public sealed record AuthLoginRequest(string Email, string Password);
+
+public sealed record ProfileRequest(
+    string? DisplayName,
+    string? Email,
+    string? AvatarUrl,
+    string? Password);
+
+public sealed record AuthResponse(string Token, Person Person);
+
 public sealed record ColumnRequest(
     string? Name,
     string? Color,
@@ -891,6 +1202,7 @@ public sealed record TaskRequest(
     string? Priority,
     int? Position,
     string? InitialComment,
+    string? AuthorType,
     string? AuthorId);
 
 public sealed record CommentRequest(

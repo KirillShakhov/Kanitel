@@ -86,6 +86,11 @@ public sealed class AgentScheduler(
                 continue;
             }
 
+            if (lastComment.AuthorType == "system")
+            {
+                continue;
+            }
+
             if (lastComment.AuthorType == "agent" && lastComment.AuthorId == agent.Id)
             {
                 continue;
