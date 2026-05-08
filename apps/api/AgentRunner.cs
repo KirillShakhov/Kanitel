@@ -49,6 +49,7 @@ public sealed class DockerAgentRunner(
         var log = new StringBuilder();
         log.AppendLine($"Kanitel run {run.Id}");
         log.AppendLine($"Workspace: {workspace}");
+        log.AppendLine($"Agent provider: {agent.ProviderPresetId}/{agent.Provider}; model: {agent.Model}; base URL: {agent.BaseUrl}.");
 
         await CloneRepositoriesAsync(repositories, workspace, log, cancellationToken);
 
@@ -336,6 +337,8 @@ public sealed class DockerAgentRunner(
         }
 
         RemoveProviderSelectionFlags(env);
+        env["CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"] = "1";
+        env["CLAUDE_CODE_PROVIDER_PROFILE_ENV_APPLIED"] = "1";
 
         var providerApiKey = ResolveAgentApiKey(agent);
         if (!string.IsNullOrWhiteSpace(providerApiKey) &&

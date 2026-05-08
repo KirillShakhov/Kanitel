@@ -136,6 +136,7 @@ public sealed class JsonDataStore
             agent.AvatarUrl ??= "";
             agent.ApiKeySourceEnvName ??= "";
             agent.CommandTemplate = AgentCommandDefaults.Normalize(agent.CommandTemplate);
+            NormalizeGithubModelsAgent(agent);
         }
 
         foreach (var person in state.People)
@@ -229,6 +230,62 @@ public sealed class JsonDataStore
             if (string.Equals(column.Name, "Ready", StringComparison.Ordinal))
             {
                 column.Name = "To Do";
+            }
+        }
+    }
+
+    private static void NormalizeGithubModelsAgent(AgentProfile agent)
+    {
+        if (!string.Equals(agent.ProviderPresetId, "github-models", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var preset = OpenClaudeCatalog.ProviderPresets.First(item => item.Id == "github-models");
+        var previousToken = ReadEnvironment(agent.Environment, "GITHUB_TOKEN")
+            ?? ReadEnvironment(agent.Environment, "GH_TOKEN")
+            ?? ReadEnvironment(agent.Environment, "OPENAI_API_KEY");
+
+        agent.Provider = preset.Provider;
+        agent.BaseUrl = string.IsNullOrWhiteSpace(agent.BaseUrl) ||
+            string.Equals(agent.BaseUrl, "https://api.githubcopilot.com", StringComparison.OrdinalIgnoreCase)
+                ? preset.BaseUrl
+                : agent.BaseUrl;
+        agent.Model = string.IsNullOrWhiteSpace(agent.Model) ? preset.DefaultModel : agent.Model;
+        agent.ApiKeyEnvName = "GITHUB_TOKEN";
+
+        RemoveEnvironment(agent.Environment, "CLAUDE_CODE_USE_OPENAI");
+        RemoveEnvironment(agent.Environment, "OPENAI_API_KEY");
+        agent.Environment["CLAUDE_CODE_USE_GITHUB"] = "1";
+        agent.Environment["OPENAI_BASE_URL"] = agent.BaseUrl;
+        agent.Environment["OPENAI_MODEL"] = agent.Model;
+
+        if (!string.IsNullOrWhiteSpace(previousToken) && string.IsNullOrWhiteSpace(ReadEnvironment(agent.Environment, "GITHUB_TOKEN")))
+        {
+            agent.Environment["GITHUB_TOKEN"] = previousToken;
+        }
+    }
+
+    private static string? ReadEnvironment(Dictionary<string, string> environment, string key)
+    {
+        foreach (var pair in environment)
+        {
+            if (pair.Key.Equals(key, StringComparison.OrdinalIgnoreCase))
+            {
+                return pair.Value;
+            }
+        }
+
+        return null;
+    }
+
+    private static void RemoveEnvironment(Dictionary<string, string> environment, string key)
+    {
+        foreach (var existingKey in environment.Keys.ToList())
+        {
+            if (existingKey.Equals(key, StringComparison.OrdinalIgnoreCase))
+            {
+                environment.Remove(existingKey);
             }
         }
     }

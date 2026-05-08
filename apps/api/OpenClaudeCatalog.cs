@@ -67,13 +67,23 @@ public static class OpenClaudeCatalog
                 ["GEMINI_MODEL"] = "gemini-3-flash-preview"
             }
         },
-        OpenAiCompatible(
-            "github-models",
-            "GitHub Models (PAT)",
-            "https://models.github.ai/inference",
-            "openai/gpt-4.1",
-            "OPENAI_API_KEY",
-            logoDomain: "github.com"),
+        new()
+        {
+            Id = "github-models",
+            Name = "GitHub Models (PAT)",
+            Provider = "github",
+            BaseUrl = "https://models.github.ai/inference",
+            DefaultModel = "openai/gpt-4.1",
+            ApiKeyEnvName = "GITHUB_TOKEN",
+            Transport = "github-models",
+            LogoUrl = $"{LogoPrefix}github.com",
+            Environment = new()
+            {
+                ["CLAUDE_CODE_USE_GITHUB"] = "1",
+                ["OPENAI_BASE_URL"] = "https://models.github.ai/inference",
+                ["OPENAI_MODEL"] = "openai/gpt-4.1"
+            }
+        },
         new()
         {
             Id = "github",
