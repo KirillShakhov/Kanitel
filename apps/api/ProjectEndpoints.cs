@@ -25,7 +25,7 @@ public static class ProjectEndpoints
                 var defaults = new[]
                 {
             ("Backlog", "#64748b"),
-            ("Ready", "#0ea5e9"),
+            ("To Do", "#0ea5e9"),
             ("In Progress", "#f59e0b"),
             ("Review", "#8b5cf6"),
             ("Done", "#22c55e")
@@ -49,7 +49,7 @@ public static class ProjectEndpoints
         })
             .WithTags("Projects")
             .WithSummary("Create project")
-            .WithDescription("Creates a project with the default kanban workflow columns: Backlog, Ready, In Progress, Review, and Done. Add people and agents as participants through the participant endpoints.");
+            .WithDescription("Creates a project with the default kanban workflow columns: Backlog, To Do, In Progress, Review, and Done. Add people and agents as participants through the participant endpoints.");
 
         app.MapPatch("/api/projects/{projectId}", async (JsonDataStore store, string projectId, ProjectRequest request, CancellationToken cancellationToken) =>
         {

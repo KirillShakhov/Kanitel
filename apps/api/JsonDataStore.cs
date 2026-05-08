@@ -5,6 +5,8 @@ namespace Kanitel.Api;
 
 public sealed class JsonDataStore
 {
+    private const string CurrentSchemaVersion = "2";
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -116,6 +118,17 @@ public sealed class JsonDataStore
         state.History ??= [];
         state.Runs ??= [];
 
+        if (!string.Equals(state.SchemaVersion, CurrentSchemaVersion, StringComparison.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(state.SchemaVersion) ||
+                string.Equals(state.SchemaVersion, "1", StringComparison.Ordinal))
+            {
+                RenameReadyColumns(state);
+            }
+
+            state.SchemaVersion = CurrentSchemaVersion;
+        }
+
         foreach (var agent in state.Agents)
         {
             agent.Environment ??= [];
@@ -149,7 +162,7 @@ public sealed class JsonDataStore
         var columns = new[]
         {
             new BoardColumn { ProjectId = project.Id, Name = "Backlog", Color = "#64748b", Position = 0 },
-            new BoardColumn { ProjectId = project.Id, Name = "Ready", Color = "#0ea5e9", Position = 1 },
+            new BoardColumn { ProjectId = project.Id, Name = "To Do", Color = "#0ea5e9", Position = 1 },
             new BoardColumn { ProjectId = project.Id, Name = "In Progress", Color = "#f59e0b", Position = 2, WipLimit = 3 },
             new BoardColumn { ProjectId = project.Id, Name = "Review", Color = "#8b5cf6", Position = 3 },
             new BoardColumn { ProjectId = project.Id, Name = "Done", Color = "#22c55e", Position = 4 }
@@ -206,5 +219,16 @@ public sealed class JsonDataStore
                 }
             ]
         };
+    }
+
+    private static void RenameReadyColumns(KanitelState state)
+    {
+        foreach (var column in state.Columns)
+        {
+            if (string.Equals(column.Name, "Ready", StringComparison.Ordinal))
+            {
+                column.Name = "To Do";
+            }
+        }
     }
 }

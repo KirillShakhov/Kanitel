@@ -2,7 +2,7 @@ namespace Kanitel.Api;
 
 public sealed class KanitelState
 {
-    public string SchemaVersion { get; set; } = "1";
+    public string SchemaVersion { get; set; } = "2";
     public List<UserAccount> Accounts { get; set; } = [];
     public List<Project> Projects { get; set; } = [];
     public List<BoardColumn> Columns { get; set; } = [];

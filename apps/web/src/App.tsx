@@ -706,6 +706,13 @@ export default function App() {
     await mutate(patchJson<TaskCard>(`/api/tasks/${taskId}`, { columnId, position: targetPosition }))
   }
 
+  async function updateColumn(columnId: string, draft: { name: string }) {
+    if (!draft.name.trim()) return
+    await mutate(patchJson<BoardColumn>(`/api/columns/${columnId}`, {
+      name: draft.name.trim()
+    }))
+  }
+
   async function addComment() {
     if (!selectedTask || !commentDraft.trim()) return
     await mutate(postJson(`/api/tasks/${selectedTask.id}/comments`, {
@@ -941,6 +948,7 @@ export default function App() {
             mutate(postJson(`/api/projects/${activeProject.id}/columns`, columnDraft))
             setColumnDraft({ name: '', color: '#d89b72' })
           }}
+          onUpdateColumn={updateColumn}
           onDeleteColumn={(columnId) => mutate(deleteJson(`/api/columns/${columnId}`))}
           onParticipantDraftChange={setParticipantDraft}
           onAddParticipant={addParticipant}
@@ -1481,6 +1489,64 @@ function TaskModal({
   )
 }
 
+function ColumnSettingsRow({
+  labels: t,
+  column,
+  busy,
+  onUpdateColumn,
+  onDeleteColumn
+}: {
+  labels: Labels
+  column: BoardColumn
+  busy: boolean
+  onUpdateColumn: (columnId: string, draft: { name: string }) => void
+  onDeleteColumn: (columnId: string) => void
+}) {
+  const [name, setName] = useState(column.name)
+
+  useEffect(() => {
+    setName(column.name)
+  }, [column.id, column.name])
+
+  const trimmedName = name.trim()
+  const canSave = Boolean(trimmedName) && trimmedName !== column.name
+
+  function saveColumnName() {
+    if (!canSave) {
+      setName(column.name)
+      return
+    }
+
+    onUpdateColumn(column.id, { name: trimmedName })
+  }
+
+  return (
+    <div className="settings-row column-settings-row">
+      <span className="color-dot" style={{ background: column.color }} />
+      <input
+        value={name}
+        onChange={event => setName(event.target.value)}
+        onKeyDown={event => {
+          if (event.key === 'Enter') {
+            saveColumnName()
+          }
+
+          if (event.key === 'Escape') {
+            setName(column.name)
+          }
+        }}
+        aria-label={t.columnName}
+      />
+      <button className="icon-button compact" title={t.save} onClick={saveColumnName} disabled={busy || !canSave}>
+        <Save size={15} />
+      </button>
+      <button className="icon-button compact" title={t.deleteColumn} onClick={() => onDeleteColumn(column.id)} disabled={busy}>
+        <Trash2 size={15} />
+      </button>
+    </div>
+  )
+}
+
 function ProjectsPage({
   labels: t,
   state,
@@ -1502,6 +1568,7 @@ function ProjectsPage({
   onDeleteProject,
   onColumnDraftChange,
   onAddColumn,
+  onUpdateColumn,
   onDeleteColumn,
   onParticipantDraftChange,
   onAddParticipant,
@@ -1530,6 +1597,7 @@ function ProjectsPage({
   onDeleteProject: () => void
   onColumnDraftChange: (draft: { name: string; color: string }) => void
   onAddColumn: () => void
+  onUpdateColumn: (columnId: string, draft: { name: string }) => void
   onDeleteColumn: (columnId: string) => void
   onParticipantDraftChange: (draft: ParticipantDraft) => void
   onAddParticipant: () => void
@@ -1589,13 +1657,14 @@ function ProjectsPage({
             <Panel title={t.columns} icon={<LayoutDashboard size={17} />}>
               <div className="row-list">
                 {columns.map(column => (
-                  <div className="settings-row" key={column.id}>
-                    <span className="color-dot" style={{ background: column.color }} />
-                    <strong>{column.name}</strong>
-                    <button className="icon-button compact" title={t.deleteColumn} onClick={() => onDeleteColumn(column.id)}>
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
+                  <ColumnSettingsRow
+                    key={column.id}
+                    labels={t}
+                    column={column}
+                    busy={busy}
+                    onUpdateColumn={onUpdateColumn}
+                    onDeleteColumn={onDeleteColumn}
+                  />
                 ))}
                 <div className="settings-row add-row">
                   <input className="color-input" type="color" value={columnDraft.color} onChange={event => onColumnDraftChange({ ...columnDraft, color: event.target.value })} />

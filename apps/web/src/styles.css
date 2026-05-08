@@ -1023,6 +1023,10 @@ label {
   grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
+.settings-row.column-settings-row {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+}
+
 .settings-row.add-row {
   grid-template-columns: 42px minmax(0, 1fr) auto;
 }
