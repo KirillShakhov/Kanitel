@@ -179,6 +179,7 @@ textarea:focus {
 }
 
 .icon-button,
+.language-button,
 .primary-button,
 .secondary-button,
 .tabs button {
@@ -203,6 +204,11 @@ textarea:focus {
 .icon-button.compact {
   width: 30px;
   min-height: 30px;
+}
+
+.language-button {
+  font-weight: 800;
+  min-width: 66px;
 }
 
 .primary-button {

@@ -2,6 +2,7 @@ import {
   Bot,
   CheckCircle2,
   GitBranch,
+  Languages,
   LayoutDashboard,
   Loader2,
   MessageSquare,
@@ -32,6 +33,7 @@ import type {
 
 type Tab = 'board' | 'project' | 'agents'
 type Theme = 'light' | 'dark'
+type Locale = 'ru' | 'en'
 
 type TaskDraft = {
   title: string
@@ -58,6 +60,159 @@ type AgentDraft = {
   environmentText: string
 }
 
+const labels = {
+  ru: {
+    loading: 'Загрузка Kanitel',
+    schedulerInfo: (runner: string, seconds: number) => `${runner} · ${seconds}s · API /api/openapi.json`,
+    newProjectTitle: 'Новый проект',
+    refreshTitle: 'Обновить',
+    darkThemeTitle: 'Темная тема',
+    lightThemeTitle: 'Светлая тема',
+    languageTitle: 'Switch to English',
+    languageButton: 'EN',
+    checkNow: 'Проверить',
+    projectNamePlaceholder: 'Название проекта',
+    descriptionPlaceholder: 'Описание',
+    create: 'Создать',
+    boardTab: 'Доска',
+    projectTab: 'Проект',
+    agentsTab: 'Агенты',
+    addTaskTitle: 'Добавить задачу',
+    titlePlaceholder: 'Заголовок',
+    noAgentOption: 'Без агента',
+    add: 'Добавить',
+    noDescription: 'Без описания',
+    taskTitle: 'Заголовок',
+    description: 'Описание',
+    status: 'Статус',
+    priority: 'Приоритет',
+    agent: 'Агент',
+    unassignedAgent: 'Не назначен',
+    taskRole: 'Роль в задаче',
+    saveTask: 'Сохранить задачу',
+    comments: 'Комментарии',
+    commentPlaceholder: 'Комментарий',
+    send: 'Отправить',
+    selectTask: 'Выберите задачу',
+    columns: 'Колонки',
+    deleteColumnTitle: 'Удалить колонку',
+    newColumnPlaceholder: 'Новая колонка',
+    addColumnTitle: 'Добавить колонку',
+    access: 'Доступ',
+    removeAccessTitle: 'Убрать доступ',
+    personNamePlaceholder: 'Имя',
+    repositories: 'Репозитории',
+    deleteRepositoryTitle: 'Удалить репозиторий',
+    repositoryNamePlaceholder: 'Название',
+    repositoryUrlPlaceholder: 'https:// или git@host:path.git',
+    projectAgents: 'Агенты проекта',
+    removeAgentTitle: 'Убрать агента',
+    selectAgent: 'Выберите агента',
+    addAgentTitle: 'Добавить агента',
+    agentProfile: 'Профиль агента',
+    newAgent: 'Новый агент',
+    newButton: 'Новый',
+    save: 'Сохранить',
+    agentName: 'Имя',
+    template: 'Шаблон',
+    avatarOrLogo: 'Аватар или логотип',
+    provider: 'Провайдер',
+    model: 'Модель',
+    baseUrl: 'Base URL',
+    apiEnv: 'API env',
+    image: 'Образ',
+    command: 'Команда',
+    systemPrompt: 'Системный prompt',
+    environment: 'Окружение',
+    enabled: 'Включен',
+    noAgentMeta: 'нет агента',
+    unassigned: 'unassigned',
+    noRuns: 'idle',
+    priorities: {
+      low: 'Низкий',
+      normal: 'Обычный',
+      high: 'Высокий',
+      urgent: 'Срочный'
+    }
+  },
+  en: {
+    loading: 'Loading Kanitel',
+    schedulerInfo: (runner: string, seconds: number) => `${runner} · ${seconds}s · API /api/openapi.json`,
+    newProjectTitle: 'New project',
+    refreshTitle: 'Refresh',
+    darkThemeTitle: 'Dark theme',
+    lightThemeTitle: 'Light theme',
+    languageTitle: 'Переключить на русский',
+    languageButton: 'RU',
+    checkNow: 'Check now',
+    projectNamePlaceholder: 'Project name',
+    descriptionPlaceholder: 'Description',
+    create: 'Create',
+    boardTab: 'Board',
+    projectTab: 'Project',
+    agentsTab: 'Agents',
+    addTaskTitle: 'Add task',
+    titlePlaceholder: 'Title',
+    noAgentOption: 'No agent',
+    add: 'Add',
+    noDescription: 'No description',
+    taskTitle: 'Title',
+    description: 'Description',
+    status: 'Status',
+    priority: 'Priority',
+    agent: 'Agent',
+    unassignedAgent: 'Unassigned',
+    taskRole: 'Task role',
+    saveTask: 'Save task',
+    comments: 'Comments',
+    commentPlaceholder: 'Comment',
+    send: 'Send',
+    selectTask: 'Select a task',
+    columns: 'Columns',
+    deleteColumnTitle: 'Delete column',
+    newColumnPlaceholder: 'New column',
+    addColumnTitle: 'Add column',
+    access: 'Access',
+    removeAccessTitle: 'Remove access',
+    personNamePlaceholder: 'Name',
+    repositories: 'Repositories',
+    deleteRepositoryTitle: 'Delete repository',
+    repositoryNamePlaceholder: 'Name',
+    repositoryUrlPlaceholder: 'https:// or git@host:path.git',
+    projectAgents: 'Project agents',
+    removeAgentTitle: 'Remove agent',
+    selectAgent: 'Select agent',
+    addAgentTitle: 'Add agent',
+    agentProfile: 'Agent profile',
+    newAgent: 'New agent',
+    newButton: 'New',
+    save: 'Save',
+    agentName: 'Name',
+    template: 'Template',
+    avatarOrLogo: 'Avatar or logo',
+    provider: 'Provider',
+    model: 'Model',
+    baseUrl: 'Base URL',
+    apiEnv: 'API env',
+    image: 'Image',
+    command: 'Command',
+    systemPrompt: 'System prompt',
+    environment: 'Environment',
+    enabled: 'Enabled',
+    noAgentMeta: 'no agent',
+    unassigned: 'unassigned',
+    noRuns: 'idle',
+    priorities: {
+      low: 'Low',
+      normal: 'Normal',
+      high: 'High',
+      urgent: 'Urgent'
+    }
+  }
+} as const
+
+type Labels = (typeof labels)[Locale]
+
 const emptyTaskDraft: TaskDraft = {
   title: '',
   description: '',
@@ -73,6 +228,7 @@ export default function App() {
   const [activeProjectId, setActiveProjectId] = useState('')
   const [activeTab, setActiveTab] = useState<Tab>('board')
   const [theme, setTheme] = useState<Theme>(() => readTheme())
+  const [locale, setLocale] = useState<Locale>(() => readLocale())
   const [selectedTaskId, setSelectedTaskId] = useState('')
   const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [projectDraft, setProjectDraft] = useState({ name: '', description: '' })
@@ -87,6 +243,7 @@ export default function App() {
   const [selectedAgentId, setSelectedAgentId] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const t = labels[locale]
 
   const refresh = useCallback(async () => {
     const payload = await loadBootstrap()
@@ -109,6 +266,11 @@ export default function App() {
     document.documentElement.dataset.theme = theme
     window.localStorage.setItem('kanitel-theme', theme)
   }, [theme])
+
+  useEffect(() => {
+    document.documentElement.lang = locale
+    window.localStorage.setItem('kanitel-locale', locale)
+  }, [locale])
 
   const state = bootstrap?.state
   const projects = state?.projects ?? []
@@ -283,7 +445,7 @@ export default function App() {
     return (
       <main className="loading-page">
         <Loader2 className="spin" size={22} />
-        <span>Загрузка Kanitel</span>
+        <span>{t.loading}</span>
       </main>
     )
   }
@@ -303,7 +465,7 @@ export default function App() {
           <div className="brand-mark">K</div>
           <div>
             <h1>Kanitel</h1>
-            <span>{bootstrap.scheduler.runner} · {bootstrap.scheduler.intervalSeconds}s · API /api/openapi.json</span>
+            <span>{t.schedulerInfo(bootstrap.scheduler.runner, bootstrap.scheduler.intervalSeconds)}</span>
           </div>
         </div>
 
@@ -313,29 +475,33 @@ export default function App() {
               <option key={project.id} value={project.id}>{project.name}</option>
             ))}
           </select>
-          <button className="icon-button" title="Новый проект" onClick={() => setNewProjectOpen(value => !value)}>
+          <button className="icon-button" title={t.newProjectTitle} onClick={() => setNewProjectOpen(value => !value)}>
             <Plus size={18} />
           </button>
-          <button className="icon-button" title="Обновить" onClick={() => mutate(refresh())} disabled={busy}>
+          <button className="icon-button" title={t.refreshTitle} onClick={() => mutate(refresh())} disabled={busy}>
             <RefreshCw size={18} />
           </button>
-          <button className="icon-button" title={theme === 'dark' ? 'Светлая тема' : 'Темная тема'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+          <button className="icon-button" title={theme === 'dark' ? t.lightThemeTitle : t.darkThemeTitle} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
             {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+          <button className="language-button" title={t.languageTitle} onClick={() => setLocale(locale === 'ru' ? 'en' : 'ru')}>
+            <Languages size={16} />
+            {t.languageButton}
           </button>
           <button className="primary-button" onClick={() => mutate(postJson('/api/scheduler/tick', {}))} disabled={busy}>
             <Play size={16} />
-            Проверить
+            {t.checkNow}
           </button>
         </div>
       </header>
 
       {newProjectOpen && (
         <section className="quick-create">
-          <input value={projectDraft.name} onChange={event => setProjectDraft({ ...projectDraft, name: event.target.value })} placeholder="Название проекта" />
-          <input value={projectDraft.description} onChange={event => setProjectDraft({ ...projectDraft, description: event.target.value })} placeholder="Описание" />
+          <input value={projectDraft.name} onChange={event => setProjectDraft({ ...projectDraft, name: event.target.value })} placeholder={t.projectNamePlaceholder} />
+          <input value={projectDraft.description} onChange={event => setProjectDraft({ ...projectDraft, description: event.target.value })} placeholder={t.descriptionPlaceholder} />
           <button className="primary-button" onClick={createProject} disabled={busy}>
             <Plus size={16} />
-            Создать
+            {t.create}
           </button>
         </section>
       )}
@@ -345,15 +511,15 @@ export default function App() {
       <nav className="tabs">
         <button className={activeTab === 'board' ? 'active' : ''} onClick={() => setActiveTab('board')}>
           <LayoutDashboard size={16} />
-          Доска
+          {t.boardTab}
         </button>
         <button className={activeTab === 'project' ? 'active' : ''} onClick={() => setActiveTab('project')}>
           <Settings size={16} />
-          Проект
+          {t.projectTab}
         </button>
         <button className={activeTab === 'agents' ? 'active' : ''} onClick={() => setActiveTab('agents')}>
           <Bot size={16} />
-          Агенты
+          {t.agentsTab}
         </button>
       </nav>
 
@@ -363,6 +529,7 @@ export default function App() {
             {columns.map(column => (
               <KanbanColumn
                 key={column.id}
+                labels={t}
                 column={column}
                 tasks={tasks.filter(task => task.columnId === column.id)}
                 selectedTaskId={selectedTaskId}
@@ -388,19 +555,19 @@ export default function App() {
               <>
                 <div className="panel-title">
                   <h2>{selectedTask.title}</h2>
-                  <span>{selectedTaskRuns[0]?.status ?? 'idle'}</span>
+                  <span>{selectedTaskRuns[0]?.status ?? t.noRuns}</span>
                 </div>
                 <label>
-                  Заголовок
+                  {t.taskTitle}
                   <input value={taskDraft.title} onChange={event => setTaskDraft({ ...taskDraft, title: event.target.value })} />
                 </label>
                 <label>
-                  Описание
+                  {t.description}
                   <textarea value={taskDraft.description} onChange={event => setTaskDraft({ ...taskDraft, description: event.target.value })} rows={5} />
                 </label>
                 <div className="form-grid two">
                   <label>
-                    Статус
+                    {t.status}
                     <select value={taskDraft.columnId} onChange={event => setTaskDraft({ ...taskDraft, columnId: event.target.value })}>
                       {columns.map(column => (
                         <option key={column.id} value={column.id}>{column.name}</option>
@@ -408,27 +575,27 @@ export default function App() {
                     </select>
                   </label>
                   <label>
-                    Приоритет
+                    {t.priority}
                     <select value={taskDraft.priority} onChange={event => setTaskDraft({ ...taskDraft, priority: event.target.value })}>
-                      <option value="low">Низкий</option>
-                      <option value="normal">Обычный</option>
-                      <option value="high">Высокий</option>
-                      <option value="urgent">Срочный</option>
+                      <option value="low">{t.priorities.low}</option>
+                      <option value="normal">{t.priorities.normal}</option>
+                      <option value="high">{t.priorities.high}</option>
+                      <option value="urgent">{t.priorities.urgent}</option>
                     </select>
                   </label>
                 </div>
                 <div className="form-grid two">
                   <label>
-                    Агент
+                    {t.agent}
                     <select value={taskDraft.assigneeAgentId} onChange={event => setTaskDraft({ ...taskDraft, assigneeAgentId: event.target.value })}>
-                      <option value="">Не назначен</option>
+                      <option value="">{t.unassignedAgent}</option>
                       {projectAgents.map(({ agent }) => (
                         <option key={agent.id} value={agent.id}>{agent.name}</option>
                       ))}
                     </select>
                   </label>
                   <label>
-                    Роль в задаче
+                    {t.taskRole}
                     <select value={taskDraft.assignmentRole} onChange={event => setTaskDraft({ ...taskDraft, assignmentRole: event.target.value })}>
                       <option value="worker">worker</option>
                       <option value="manager">manager</option>
@@ -438,31 +605,31 @@ export default function App() {
                 </div>
                 <button className="primary-button full" onClick={saveTask} disabled={busy}>
                   <Save size={16} />
-                  Сохранить задачу
+                  {t.saveTask}
                 </button>
 
                 <section className="comments">
-                  <h3><MessageSquare size={16} /> Комментарии</h3>
+                  <h3><MessageSquare size={16} /> {t.comments}</h3>
                   {selectedTaskComments.map(comment => (
                     <article key={comment.id} className={`comment ${comment.authorType}`}>
                       <div>
                         <strong>{authorLabel(comment.authorType, comment.authorId, state.agents, state.people)}</strong>
-                        <span>{formatDate(comment.createdAt)}</span>
+                        <span>{formatDate(comment.createdAt, locale)}</span>
                       </div>
                       <p>{comment.body}</p>
                     </article>
                   ))}
-                  <textarea value={commentDraft} onChange={event => setCommentDraft(event.target.value)} rows={4} placeholder="Комментарий" />
+                  <textarea value={commentDraft} onChange={event => setCommentDraft(event.target.value)} rows={4} placeholder={t.commentPlaceholder} />
                   <button className="secondary-button full" onClick={addComment} disabled={busy}>
                     <MessageSquare size={16} />
-                    Отправить
+                    {t.send}
                   </button>
                 </section>
               </>
             ) : (
               <div className="empty-panel">
                 <CheckCircle2 size={22} />
-                <span>Выберите задачу</span>
+                <span>{t.selectTask}</span>
               </div>
             )}
           </aside>
@@ -471,7 +638,7 @@ export default function App() {
 
       {activeTab === 'project' && (
         <section className="settings-grid">
-          <Panel title="Колонки" icon={<LayoutDashboard size={17} />}>
+          <Panel title={t.columns} icon={<LayoutDashboard size={17} />}>
             <div className="row-list">
               {columns.map(column => (
                 <div className="settings-row" key={column.id}>
@@ -481,15 +648,15 @@ export default function App() {
                     }
                   }} />
                   <input className="color-input" type="color" value={column.color} onChange={event => mutate(patchJson(`/api/columns/${column.id}`, { color: event.target.value }))} />
-                  <button className="icon-button compact" title="Удалить колонку" onClick={() => mutate(deleteJson(`/api/columns/${column.id}`))}>
+                  <button className="icon-button compact" title={t.deleteColumnTitle} onClick={() => mutate(deleteJson(`/api/columns/${column.id}`))}>
                     <Trash2 size={15} />
                   </button>
                 </div>
               ))}
               <div className="settings-row">
-                <input value={columnDraft.name} onChange={event => setColumnDraft({ ...columnDraft, name: event.target.value })} placeholder="Новая колонка" />
+                <input value={columnDraft.name} onChange={event => setColumnDraft({ ...columnDraft, name: event.target.value })} placeholder={t.newColumnPlaceholder} />
                 <input className="color-input" type="color" value={columnDraft.color} onChange={event => setColumnDraft({ ...columnDraft, color: event.target.value })} />
-                <button className="icon-button compact" title="Добавить колонку" onClick={() => {
+                <button className="icon-button compact" title={t.addColumnTitle} onClick={() => {
                   mutate(postJson(`/api/projects/${activeProject.id}/columns`, columnDraft))
                   setColumnDraft({ name: '', color: '#2563eb' })
                 }}>
@@ -499,7 +666,7 @@ export default function App() {
             </div>
           </Panel>
 
-          <Panel title="Доступ" icon={<Users size={17} />}>
+          <Panel title={t.access} icon={<Users size={17} />}>
             <div className="row-list">
               {state.members.filter(member => member.projectId === activeProject.id).map(member => {
                 const person = state.people.find(item => item.id === member.personId)
@@ -508,14 +675,14 @@ export default function App() {
                     <Avatar name={person?.displayName ?? member.personId} url={person?.avatarUrl} />
                     <span>{person?.displayName ?? member.personId}</span>
                     <span className="muted">{member.role}</span>
-                    <button className="icon-button compact" title="Убрать доступ" onClick={() => mutate(deleteJson(`/api/members/${member.id}`))}>
+                    <button className="icon-button compact" title={t.removeAccessTitle} onClick={() => mutate(deleteJson(`/api/members/${member.id}`))}>
                       <Trash2 size={15} />
                     </button>
                   </div>
                 )
               })}
               <div className="stack-form">
-                <input value={memberDraft.displayName} onChange={event => setMemberDraft({ ...memberDraft, displayName: event.target.value })} placeholder="Имя" />
+                <input value={memberDraft.displayName} onChange={event => setMemberDraft({ ...memberDraft, displayName: event.target.value })} placeholder={t.personNamePlaceholder} />
                 <input value={memberDraft.email} onChange={event => setMemberDraft({ ...memberDraft, email: event.target.value })} placeholder="email" />
                 <input value={memberDraft.avatarUrl} onChange={event => setMemberDraft({ ...memberDraft, avatarUrl: event.target.value })} placeholder="avatar URL" />
                 <select value={memberDraft.role} onChange={event => setMemberDraft({ ...memberDraft, role: event.target.value })}>
@@ -528,27 +695,27 @@ export default function App() {
                   setMemberDraft({ displayName: '', email: '', avatarUrl: '', role: 'editor' })
                 }}>
                   <Plus size={16} />
-                  Добавить
+                  {t.add}
                 </button>
               </div>
             </div>
           </Panel>
 
-          <Panel title="Репозитории" icon={<GitBranch size={17} />}>
+          <Panel title={t.repositories} icon={<GitBranch size={17} />}>
             <div className="row-list">
               {state.repositories.filter(repo => repo.projectId === activeProject.id).map(repo => (
                 <div className="repo-row" key={repo.id}>
                   <strong>{repo.name}</strong>
                   <span>{repo.url}</span>
                   <em>{repo.branch || repo.authMode}</em>
-                  <button className="icon-button compact" title="Удалить репозиторий" onClick={() => mutate(deleteJson(`/api/repositories/${repo.id}`))}>
+                  <button className="icon-button compact" title={t.deleteRepositoryTitle} onClick={() => mutate(deleteJson(`/api/repositories/${repo.id}`))}>
                     <Trash2 size={15} />
                   </button>
                 </div>
               ))}
               <div className="stack-form">
-                <input value={repoDraft.name} onChange={event => setRepoDraft({ ...repoDraft, name: event.target.value })} placeholder="Название" />
-                <input value={repoDraft.url} onChange={event => setRepoDraft({ ...repoDraft, url: event.target.value })} placeholder="https:// или git@host:path.git" />
+                <input value={repoDraft.name} onChange={event => setRepoDraft({ ...repoDraft, name: event.target.value })} placeholder={t.repositoryNamePlaceholder} />
+                <input value={repoDraft.url} onChange={event => setRepoDraft({ ...repoDraft, url: event.target.value })} placeholder={t.repositoryUrlPlaceholder} />
                 <input value={repoDraft.branch} onChange={event => setRepoDraft({ ...repoDraft, branch: event.target.value })} placeholder="branch" />
                 <select value={repoDraft.authMode} onChange={event => setRepoDraft({ ...repoDraft, authMode: event.target.value })}>
                   <option value="http">http</option>
@@ -559,13 +726,13 @@ export default function App() {
                   setRepoDraft({ name: '', url: '', branch: '', authMode: 'http' })
                 }}>
                   <Plus size={16} />
-                  Добавить
+                  {t.add}
                 </button>
               </div>
             </div>
           </Panel>
 
-          <Panel title="Агенты проекта" icon={<Bot size={17} />}>
+          <Panel title={t.projectAgents} icon={<Bot size={17} />}>
             <div className="row-list">
               {projectAgents.map(({ link, agent }) => (
                 <div className="agent-access-row" key={link.id}>
@@ -577,14 +744,14 @@ export default function App() {
                     <option value="manager">manager</option>
                     <option value="observer">observer</option>
                   </select>
-                  <button className="icon-button compact" title="Убрать агента" onClick={() => mutate(deleteJson(`/api/project-agents/${link.id}`))}>
+                  <button className="icon-button compact" title={t.removeAgentTitle} onClick={() => mutate(deleteJson(`/api/project-agents/${link.id}`))}>
                     <Trash2 size={15} />
                   </button>
                 </div>
               ))}
               <div className="settings-row">
                 <select value={projectAgentDraft.agentId} onChange={event => setProjectAgentDraft({ ...projectAgentDraft, agentId: event.target.value })}>
-                  <option value="">Выберите агента</option>
+                  <option value="">{t.selectAgent}</option>
                   {unlinkedAgents.map(agent => (
                     <option key={agent.id} value={agent.id}>{agent.name}</option>
                   ))}
@@ -595,7 +762,7 @@ export default function App() {
                   <option value="manager">manager</option>
                   <option value="observer">observer</option>
                 </select>
-                <button className="icon-button compact" title="Добавить агента" onClick={() => mutate(postJson(`/api/projects/${activeProject.id}/agents`, projectAgentDraft))}>
+                <button className="icon-button compact" title={t.addAgentTitle} onClick={() => mutate(postJson(`/api/projects/${activeProject.id}/agents`, projectAgentDraft))}>
                   <Plus size={15} />
                 </button>
               </div>
@@ -620,16 +787,17 @@ export default function App() {
           </div>
           <div className="agent-editor">
             <div className="panel-title">
-              <h2>{selectedAgent ? 'Профиль агента' : 'Новый агент'}</h2>
+              <h2>{selectedAgent ? t.agentProfile : t.newAgent}</h2>
               <button className="secondary-button" onClick={() => {
                 setSelectedAgentId('')
                 setAgentDraft(initialAgentDraft(bootstrap.providerPresets[0], bootstrap.agentTemplates[0]))
               }}>
                 <Plus size={16} />
-                Новый
+                {t.newButton}
               </button>
             </div>
             <AgentForm
+              labels={t}
               draft={agentDraft}
               presets={bootstrap.providerPresets}
               templates={bootstrap.agentTemplates}
@@ -641,12 +809,12 @@ export default function App() {
               {selectedAgent ? (
                 <button className="primary-button" onClick={saveAgent} disabled={busy}>
                   <Save size={16} />
-                  Сохранить
+                  {t.save}
                 </button>
               ) : (
                 <button className="primary-button" onClick={createAgent} disabled={busy}>
                   <Plus size={16} />
-                  Создать
+                  {t.create}
                 </button>
               )}
             </div>
@@ -658,6 +826,7 @@ export default function App() {
 }
 
 function KanbanColumn({
+  labels: t,
   column,
   tasks,
   selectedTaskId,
@@ -672,6 +841,7 @@ function KanbanColumn({
   onDraftChange,
   onCreateTask
 }: {
+  labels: Labels
   column: BoardColumn
   tasks: TaskCard[]
   selectedTaskId: string
@@ -693,18 +863,18 @@ function KanbanColumn({
           <h2>{column.name}</h2>
           <span>{tasks.length}{column.wipLimit ? ` / ${column.wipLimit}` : ''}</span>
         </div>
-        <button className="icon-button compact" title="Добавить задачу" onClick={onOpenNewTask}>
+        <button className="icon-button compact" title={t.addTaskTitle} onClick={onOpenNewTask}>
           <Plus size={16} />
         </button>
       </header>
 
       {newTaskColumnId === column.id && (
         <div className="inline-form">
-          <input value={taskDraft.title} onChange={event => onDraftChange({ ...taskDraft, title: event.target.value })} placeholder="Заголовок" />
-          <textarea value={taskDraft.description} onChange={event => onDraftChange({ ...taskDraft, description: event.target.value })} placeholder="Описание" rows={3} />
+          <input value={taskDraft.title} onChange={event => onDraftChange({ ...taskDraft, title: event.target.value })} placeholder={t.titlePlaceholder} />
+          <textarea value={taskDraft.description} onChange={event => onDraftChange({ ...taskDraft, description: event.target.value })} placeholder={t.descriptionPlaceholder} rows={3} />
           <div className="form-grid two">
             <select value={taskDraft.assigneeAgentId} onChange={event => onDraftChange({ ...taskDraft, assigneeAgentId: event.target.value })}>
-              <option value="">Без агента</option>
+              <option value="">{t.noAgentOption}</option>
               {projectAgents.map(({ agent }) => (
                 <option key={agent.id} value={agent.id}>{agent.name}</option>
               ))}
@@ -717,7 +887,7 @@ function KanbanColumn({
           </div>
           <button className="primary-button" onClick={onCreateTask} disabled={busy}>
             <Plus size={16} />
-            Добавить
+            {t.add}
           </button>
         </div>
       )}
@@ -729,10 +899,10 @@ function KanbanColumn({
             className={`task-card ${selectedTaskId === task.id ? 'selected' : ''}`}
             onClick={() => onSelectTask(task.id)}
           >
-            <span className={`priority ${task.priority}`}>{priorityLabel(task.priority)}</span>
+            <span className={`priority ${task.priority}`}>{priorityLabel(task.priority, t)}</span>
             <strong>{task.title}</strong>
-            <span className="task-description">{task.description || 'Без описания'}</span>
-            <TaskMeta task={task} agents={agents} runs={runs} />
+            <span className="task-description">{task.description || t.noDescription}</span>
+            <TaskMeta labels={t} task={task} agents={agents} runs={runs} />
           </button>
         ))}
       </div>
@@ -753,6 +923,7 @@ function Panel({ title, icon, children }: { title: string; icon: ReactNode; chil
 }
 
 function AgentForm({
+  labels: t,
   draft,
   presets,
   templates,
@@ -760,6 +931,7 @@ function AgentForm({
   onPreset,
   onTemplate
 }: {
+  labels: Labels
   draft: AgentDraft
   presets: ProviderPreset[]
   templates: AgentTemplate[]
@@ -771,11 +943,11 @@ function AgentForm({
     <div className="agent-form">
       <div className="form-grid two">
         <label>
-          Имя
+          {t.agentName}
           <input value={draft.name} onChange={event => onChange({ ...draft, name: event.target.value })} />
         </label>
         <label>
-          Шаблон
+          {t.template}
           <select value={draft.templateId} onChange={event => onTemplate(event.target.value)}>
             {templates.map(template => (
               <option key={template.id} value={template.id}>{template.name}</option>
@@ -784,12 +956,12 @@ function AgentForm({
         </label>
       </div>
       <label>
-        Аватар или логотип
+        {t.avatarOrLogo}
         <input value={draft.avatarUrl} onChange={event => onChange({ ...draft, avatarUrl: event.target.value })} placeholder="https://..." />
       </label>
       <div className="form-grid two">
         <label>
-          Провайдер
+          {t.provider}
           <select value={draft.providerPresetId} onChange={event => onPreset(event.target.value)}>
             {presets.map(preset => (
               <option key={preset.id} value={preset.id}>{preset.name}</option>
@@ -797,39 +969,39 @@ function AgentForm({
           </select>
         </label>
         <label>
-          Модель
+          {t.model}
           <input value={draft.model} onChange={event => onChange({ ...draft, model: event.target.value })} />
         </label>
       </div>
       <label>
-        Base URL
+        {t.baseUrl}
         <input value={draft.baseUrl} onChange={event => onChange({ ...draft, baseUrl: event.target.value })} />
       </label>
       <div className="form-grid two">
         <label>
-          API env
+          {t.apiEnv}
           <input value={draft.apiKeyEnvName} onChange={event => onChange({ ...draft, apiKeyEnvName: event.target.value })} />
         </label>
         <label>
-          Image
+          {t.image}
           <input value={draft.containerImage} onChange={event => onChange({ ...draft, containerImage: event.target.value })} />
         </label>
       </div>
       <label>
-        Command
+        {t.command}
         <textarea value={draft.commandTemplate} onChange={event => onChange({ ...draft, commandTemplate: event.target.value })} rows={3} />
       </label>
       <label>
-        System prompt
+        {t.systemPrompt}
         <textarea value={draft.systemPrompt} onChange={event => onChange({ ...draft, systemPrompt: event.target.value })} rows={5} />
       </label>
       <label>
-        Environment
+        {t.environment}
         <textarea value={draft.environmentText} onChange={event => onChange({ ...draft, environmentText: event.target.value })} rows={6} />
       </label>
       <label className="toggle-row">
         <input type="checkbox" checked={draft.enabled} onChange={event => onChange({ ...draft, enabled: event.target.checked })} />
-        Enabled
+        {t.enabled}
       </label>
     </div>
   )
@@ -854,16 +1026,16 @@ function Avatar({ name, url }: { name: string; url?: string | null }) {
   )
 }
 
-function TaskMeta({ task, agents, runs }: { task: TaskCard; agents: AgentProfile[]; runs: Array<{ taskId: string; status: string; createdAt: string }> }) {
+function TaskMeta({ labels: t, task, agents, runs }: { labels: Labels; task: TaskCard; agents: AgentProfile[]; runs: Array<{ taskId: string; status: string; createdAt: string }> }) {
   const agent = agents.find(item => item.id === task.assigneeAgentId)
   const run = runs
     .filter(item => item.taskId === task.id)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
   return (
     <span className="task-meta">
-      <span><Bot size={13} /> {agent?.name ?? 'нет агента'}</span>
-      <span>{task.assigneeAgentId ? task.assignmentRole : 'unassigned'}</span>
-      <span>{run?.status ?? 'idle'}</span>
+      <span><Bot size={13} /> {agent?.name ?? t.noAgentMeta}</span>
+      <span>{task.assigneeAgentId ? task.assignmentRole : t.unassigned}</span>
+      <span>{run?.status ?? t.noRuns}</span>
     </span>
   )
 }
@@ -924,13 +1096,12 @@ function envToText(env: Record<string, string> = {}) {
     .join('\n')
 }
 
-function priorityLabel(priority: string) {
-  return {
-    low: 'low',
-    normal: 'normal',
-    high: 'high',
-    urgent: 'urgent'
-  }[priority] ?? priority
+function priorityLabel(priority: string, t: Labels) {
+  if (priority === 'low' || priority === 'normal' || priority === 'high' || priority === 'urgent') {
+    return t.priorities[priority]
+  }
+
+  return priority
 }
 
 function authorLabel(authorType: string, authorId: string, agents: AgentProfile[], people: Person[]) {
@@ -943,8 +1114,8 @@ function authorLabel(authorType: string, authorId: string, agents: AgentProfile[
   return authorType
 }
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('ru', {
+function formatDate(value: string, locale: Locale) {
+  return new Intl.DateTimeFormat(locale === 'ru' ? 'ru-RU' : 'en-US', {
     day: '2-digit',
     month: '2-digit',
     hour: '2-digit',
@@ -956,4 +1127,10 @@ function readTheme(): Theme {
   const stored = window.localStorage.getItem('kanitel-theme')
   if (stored === 'light' || stored === 'dark') return stored
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+function readLocale(): Locale {
+  const stored = window.localStorage.getItem('kanitel-locale')
+  if (stored === 'ru' || stored === 'en') return stored
+  return window.navigator.language.toLowerCase().startsWith('ru') ? 'ru' : 'en'
 }
